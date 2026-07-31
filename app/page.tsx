@@ -115,12 +115,14 @@ export default function Home() {
 
       {phase === "idle" && (
         <section className="text-center max-w-2xl mx-auto rise">
-          <h1 className="text-4xl md:text-5xl font-bold leading-tight tracking-tight">
-            Your skin, <span style={{ color: "var(--accent)" }}>read in seconds.</span>
+          <div className="eyebrow mb-5">AI skin analysis · routine · real products</div>
+          <h1 className="display" style={{ fontSize: "clamp(2.6rem, 7vw, 4.2rem)" }}>
+            Read your skin like<br />
+            an <span style={{ color: "var(--violet-2)", fontStyle: "italic" }}>instrument.</span>
           </h1>
-          <p className="mt-4 text-lg" style={{ color: "var(--muted)" }}>
-            Snap a selfie. Get an instant read on your skin&apos;s key concerns, a personalized AM/PM routine,
-            and real products matched to your skin — powered by dermatologist-grade AI.
+          <p className="mt-6 text-lg mx-auto" style={{ color: "var(--muted)", maxWidth: "34rem" }}>
+            One selfie. A precise read on your skin&apos;s concerns, a routine built for them,
+            and the real products that match — in seconds.
           </p>
 
           <div className="mt-8 flex flex-col sm:flex-row gap-3 justify-center items-center">
@@ -184,17 +186,27 @@ export default function Home() {
 
       {phase === "analyzing" && (
         <section className="max-w-md mx-auto text-center py-16">
-          {preview ? (
-            <img src={preview} alt="your selfie" className="w-32 h-32 object-cover rounded-full mx-auto mb-6"
-              style={{ boxShadow: "var(--shadow)", animation: "pulseSoft 1.6s ease-in-out infinite" }} />
-          ) : (
-            <div className="w-32 h-32 rounded-full mx-auto mb-6 skeleton" style={{ animation: "pulseSoft 1.6s ease-in-out infinite" }} />
-          )}
-          <div className="text-lg font-medium">{LOADER_STEPS[loaderStep]}</div>
-          <div className="mt-4 space-y-2">
+          <div className="relative w-36 h-36 mx-auto mb-8 rounded-full overflow-hidden"
+            style={{ boxShadow: "0 0 0 1px var(--border), 0 0 60px -10px var(--glow)" }}>
+            {preview ? (
+              <img src={preview} alt="your selfie" className="w-full h-full object-cover" />
+            ) : (
+              <div className="w-full h-full skeleton" />
+            )}
+            {/* Scanning sweep */}
+            <div className="absolute inset-x-0 h-1/2 pointer-events-none"
+              style={{
+                background: "linear-gradient(var(--violet), transparent)",
+                opacity: 0.5, animation: "scanSweep 1.8s ease-in-out infinite",
+              }} />
+            <div className="absolute inset-0 rounded-full" style={{ boxShadow: "inset 0 0 40px -10px var(--glow)" }} />
+          </div>
+          <div className="eyebrow" style={{ color: "var(--violet-2)" }}>analyzing</div>
+          <div className="text-lg font-medium mt-2">{LOADER_STEPS[loaderStep]}</div>
+          <div className="mt-5 flex gap-1.5 justify-center">
             {LOADER_STEPS.map((_, i) => (
-              <div key={i} className="h-1.5 rounded-full mx-auto" style={{
-                width: 180, background: i <= loaderStep ? "var(--accent)" : "var(--border)", transition: "background 0.4s",
+              <div key={i} className="h-1 rounded-full" style={{
+                width: 34, background: i <= loaderStep ? "var(--violet)" : "var(--border)", transition: "background 0.4s",
               }} />
             ))}
           </div>
