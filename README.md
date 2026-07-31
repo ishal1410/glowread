@@ -1,36 +1,60 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# GlowRead — AI Skincare Coach
 
-## Getting Started
+Snap a selfie → instant AI analysis of 15 skin concerns → a personalized AM/PM routine → real products matched to your skin.
 
-First, run the development server:
+Built for the **DevNetwork [API + Cloud + AI] Hackathon 2026** — Perfect Corp challenge.
+
+---
+
+## Run it
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev        # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+No API keys needed — the app ships in **mock-first mode** with realistic sample data.
+Click **"Try a demo"** or upload a selfie. To go live, copy `.env.local.example` → `.env.local` and add keys.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Production build: `npm run build && npm run start`.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+---
 
-## Learn More
+## How it works (architecture)
 
-To learn more about Next.js, take a look at the following resources:
+```
+Selfie ─▶ /api/analyze ─▶ skinClient (Perfect Corp, 4-step async)  ─┐
+                          agent (deterministic core + LLM narration) │
+                          safety (hard cosmetic-safety rules)        │
+                          productMatcher (real catalog, deterministic)
+                                             └─▶ Reveal UI (scorecard, routine, products)
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| Module | Responsibility |
+|---|---|
+| `lib/skinClient.ts` | Perfect Corp Skin Analysis (upload → task → poll). Mock mode by default. |
+| `lib/agent.ts` | **Deterministic planner** builds a valid, safe plan from scores; optional Gemini/Claude layer only rewrites wording. |
+| `lib/safety.ts` | Hard rules: pregnancy excludes retinoids/BHA/BPO; active-conflict warnings; SPF always enforced. |
+| `lib/products.ts` | Real, widely-available products + concern→ingredient map + deterministic matcher. |
+| `components/Reveal.tsx` | The "reveal": health ring, concern bars, AM/PM routine, product cards. |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Key design decisions (the "why" — interview/judge prep)
 
-## Deploy on Vercel
+- **LLM reasons, code retrieves.** The LLM never picks product brands — a deterministic matcher does. This prevents hallucinated products and makes every recommendation explainable and testable.
+- **Deterministic core, LLM as narration.** The plan's structure is always built in code, so the output schema can never break. The LLM only makes the wording warmer. Robust by construction.
+- **`raw_score` vs `ui_score`.** The agent reasons on the accurate raw score; the UI shows the gentler consumer-calibrated score.
+- **Privacy by default.** Selfies are analyzed, not stored. No accounts in the MVP.
+- **Safety is not the model's job.** Cosmetic-safety rules are enforced in code after the plan, independent of the LLM.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### Business model (Feasibility)
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+B2B white-label for skincare brands and retailers (Perfect Corp's own model), with affiliate product links as secondary consumer revenue.
+
+---
+
+## Status
+
+- ✅ MVP: analysis → agent → safety → product match → polished reveal, deploy-ready (Vercel).
+- ⏭️ Stretch: progress tracking (re-scan deltas), embeddings RAG, live product prices (SerpApi), Nutrient signed-PDF report.
+
+*Cosmetic guidance only — not medical advice. Product prices are indicative and refreshed with live data before launch.*
