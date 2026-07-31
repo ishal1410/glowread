@@ -16,7 +16,7 @@ npm run dev        # http://localhost:3000
 No API keys needed — the app ships in **mock-first mode** with realistic sample data.
 Click **"Try a demo"** or upload a selfie. To go live, copy `.env.local.example` → `.env.local` and add keys.
 
-Production build: `npm run build && npm run start`.
+Production build: `npm run build && npm run start`. Tests: `npm test` (Vitest, 16 tests over the pure logic — polarity, safety, matcher).
 
 ---
 
@@ -55,6 +55,7 @@ B2B white-label for skincare brands and retailers (Perfect Corp's own model), wi
 ## Status
 
 - ✅ MVP: analysis → agent → safety → product match → polished reveal, deploy-ready (Vercel).
+- ✅ 16 unit tests (Vitest) over the deterministic core.
 - ⏭️ Stretch: progress tracking (re-scan deltas), embeddings RAG, live product prices (SerpApi), Nutrient signed-PDF report.
 
 *Cosmetic guidance only — not medical advice. Product prices are indicative and refreshed with live data before launch.*
