@@ -12,7 +12,7 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-// Display face: elegant serif for the "reveal" and hero — the beauty voice.
+// Display face: elegant serif for the "reveal" and hero (the beauty voice).
 const instrumentSerif = Instrument_Serif({
   weight: "400",
   style: ["normal", "italic"],
@@ -21,8 +21,8 @@ const instrumentSerif = Instrument_Serif({
 });
 
 export const metadata: Metadata = {
-  title: "GlowRead — AI Skincare Coach",
-  description: "Snap a selfie and get an instant, personalized skin analysis, routine, and product plan.",
+  title: "GlowRead · AI Skincare Coach",
+  description: "Take a selfie and see what your skin needs, a routine for it, and real products that fit.",
 };
 
 export default function RootLayout({

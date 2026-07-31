@@ -33,7 +33,7 @@ export function applySafety(plan: AgentPlan, profile?: UserProfile): SafetyResul
   if (profile?.pregnant) {
     for (const ing of PREGNANCY_AVOID) exclude.add(ing);
     warnings.push(
-      "You indicated pregnancy/breastfeeding: retinoids, salicylic acid, and benzoyl peroxide are excluded. Azelaic acid, niacinamide, and vitamin C are gentler alternatives — confirm with your doctor."
+      "Since you're pregnant or breastfeeding, we left out retinoids, salicylic acid, and benzoyl peroxide. Azelaic acid, niacinamide, and vitamin C are gentler options. Check with your doctor before starting anything new."
     );
   }
 

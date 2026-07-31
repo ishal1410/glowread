@@ -8,18 +8,18 @@ import { CONCERN_INGREDIENTS } from "./products";
 import { badness } from "./metrics";
 
 const EXPLANATIONS: Record<string, string> = {
-  wrinkle: "Fine lines are showing where skin moves and folds most. Consistent moisture and cell-turnover support help soften them over time.",
-  firmness: "Skin is looking a little less bouncy than it could. Ingredients that support collagen can help it feel firmer.",
-  pore: "Pores look more visible, often tied to oil and buildup. Regular gentle clearing keeps them looking tighter.",
-  texture: "Surface feels uneven. Gentle exfoliation smooths and refreshes the look.",
-  acne: "There's some breakout activity. Targeted clearing ingredients calm and prevent new spots.",
-  spot: "A few darker marks stand out. Brightening ingredients help fade them gradually.",
-  pigmentation: "Uneven tone is the main story here. Brightening and daily SPF even things out over weeks.",
-  redness: "Skin reads a bit reactive/flushed. Calming, barrier-friendly ingredients settle it down.",
-  hydration: "Skin is thirsty. Layering water-binding ingredients restores plumpness and glow.",
-  oiliness: "Skin runs oily, especially midday. Oil-balancing ingredients reduce shine without stripping.",
-  dark_circle: "The under-eye area looks shadowed/puffy. Depuffing and brightening help it look more rested.",
-  radiance: "Skin could look more lit-from-within. Antioxidants and gentle exfoliation bring back glow.",
+  wrinkle: "Fine lines are starting to show where your face moves most. Moisturizing well and using a retinoid at night softens them over time.",
+  firmness: "Your skin looks a little less bouncy than it could. Peptides and retinoids help it firm back up.",
+  pore: "Your pores look more visible, usually from oil and buildup. Clearing them regularly keeps them tighter.",
+  texture: "Your skin feels uneven to the touch. A gentle exfoliant a few times a week smooths it out.",
+  acne: "You've got some active breakouts. Salicylic acid calms them and helps stop new ones.",
+  spot: "A few dark marks stand out. Vitamin C and niacinamide fade them over a few weeks.",
+  pigmentation: "Your tone is uneven in places. Brightening ingredients and daily sunscreen even it out.",
+  redness: "Your skin looks a bit flushed or reactive. Calming ingredients like azelaic acid settle it down.",
+  hydration: "Your skin is dry and needs water. Hyaluronic acid under a good moisturizer brings back the plumpness.",
+  oiliness: "Your skin gets oily, especially by midday. Niacinamide balances it without drying you out.",
+  dark_circle: "The area under your eyes looks shadowed or puffy. Caffeine and a little brightening help it look more rested.",
+  radiance: "Your skin looks a little dull. Antioxidants and gentle exfoliation bring the glow back.",
 };
 
 function severityOf(raw: number): Severity {
@@ -68,7 +68,7 @@ export function buildPlanFromScores(scores: SkinScores, profile?: UserProfile): 
     { order: 1, product_type: "Cleanser", ingredient: "glycerin", why: "Start clean without stripping the barrier." },
     ...(brightening ? [{ order: 2, product_type: "Serum", ingredient: "vitamin c", why: "Antioxidant brightening; pairs well with daytime SPF." }] : []),
     { order: 3, product_type: "Moisturizer", ingredient: "hyaluronic acid", why: "Lock in hydration for a plump, healthy look." },
-    { order: 4, product_type: "Sunscreen", ingredient: "spf", why: "Non-negotiable daily protection and anti-aging." },
+    { order: 4, product_type: "Sunscreen", ingredient: "spf", why: "The best daily habit for protecting your skin and slowing aging." },
   ];
 
   const PM: RoutineStep[] = [

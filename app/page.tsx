@@ -10,7 +10,7 @@ const LOADER_STEPS = [
   "Detecting face…",
   "Scoring your skin concerns…",
   "Reading hydration & texture…",
-  "Building your personalized routine…",
+  "Building your routine…",
   "Matching real products…",
 ];
 
@@ -121,8 +121,8 @@ export default function Home() {
             an <span style={{ color: "var(--violet-2)", fontStyle: "italic" }}>instrument.</span>
           </h1>
           <p className="mt-6 text-lg mx-auto" style={{ color: "var(--muted)", maxWidth: "34rem" }}>
-            One selfie. A precise read on your skin&apos;s concerns, a routine built for them,
-            and the real products that match — in seconds.
+            Take one selfie. In a few seconds you&apos;ll see what your skin needs,
+            a simple routine for it, and real products that fit.
           </p>
 
           <div className="mt-8 flex flex-col sm:flex-row gap-3 justify-center items-center">
@@ -179,7 +179,7 @@ export default function Home() {
           </div>
 
           <p className="text-xs mt-8" style={{ color: "var(--muted)" }}>
-            Photos are analyzed, not stored. Cosmetic guidance only — not medical advice.
+            We analyze your photo and never store it. This is cosmetic guidance, not medical advice.
           </p>
         </section>
       )}
@@ -221,9 +221,9 @@ export default function Home() {
           </div>
           <footer className="text-center text-xs mt-8 pb-4" style={{ color: "var(--muted)" }}>
             {result.scores.source === "mock"
-              ? "Demo mode — sample analysis. Live Perfect Corp analysis activates when the API key is connected."
-              : "Powered by Perfect Corp Skin Analysis."}
-            {" "}Cosmetic guidance only, not medical advice. Product prices are indicative.
+              ? "Demo mode with sample data. Connect the Perfect Corp API key to run a live analysis."
+              : "Analysis by Perfect Corp."}
+            {" "}This is cosmetic guidance, not medical advice, and prices are rough estimates.
           </footer>
         </section>
       )}
