@@ -8,7 +8,7 @@ type Phase = "idle" | "analyzing" | "done" | "error";
 
 const LOADER_STEPS = [
   "Detecting face…",
-  "Scoring 15 skin concerns…",
+  "Scoring your skin concerns…",
   "Reading hydration & texture…",
   "Building your personalized routine…",
   "Matching real products…",
@@ -75,7 +75,10 @@ export default function Home() {
   function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
-    setPreview(URL.createObjectURL(f));
+    setPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return URL.createObjectURL(f);
+    });
     const fd = new FormData();
     fd.append("image", f);
     fd.append("profile", JSON.stringify(profile));
@@ -89,7 +92,10 @@ export default function Home() {
 
   function reset() {
     setResult(null);
-    setPreview(null);
+    setPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
     setPhase("idle");
   }
 
@@ -113,7 +119,7 @@ export default function Home() {
             Your skin, <span style={{ color: "var(--accent)" }}>read in seconds.</span>
           </h1>
           <p className="mt-4 text-lg" style={{ color: "var(--muted)" }}>
-            Snap a selfie. Get an instant analysis of 15 skin concerns, a personalized AM/PM routine,
+            Snap a selfie. Get an instant read on your skin&apos;s key concerns, a personalized AM/PM routine,
             and real products matched to your skin — powered by dermatologist-grade AI.
           </p>
 
@@ -179,7 +185,6 @@ export default function Home() {
       {phase === "analyzing" && (
         <section className="max-w-md mx-auto text-center py-16">
           {preview ? (
-            // eslint-disable-next-line @next/next/no-img-element
             <img src={preview} alt="your selfie" className="w-32 h-32 object-cover rounded-full mx-auto mb-6"
               style={{ boxShadow: "var(--shadow)", animation: "pulseSoft 1.6s ease-in-out infinite" }} />
           ) : (

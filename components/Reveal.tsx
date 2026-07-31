@@ -1,5 +1,6 @@
 import type { AnalyzeResult, ConcernScore, RoutineStep, MatchedProduct, Severity } from "@/lib/types";
 import { INGREDIENT_RATIONALE } from "@/lib/products";
+import { badness } from "@/lib/metrics";
 
 const sevColor: Record<Severity, string> = {
   high: "var(--rose)",
@@ -31,7 +32,9 @@ function ScoreRing({ value }: { value: number }) {
 }
 
 function ConcernBar({ concern, i }: { concern: ConcernScore; i: number }) {
-  const level: Severity = concern.ui_score >= 55 ? "high" : concern.ui_score >= 35 ? "moderate" : "low";
+  // Color by polarity-aware "badness" so high firmness/radiance read as good.
+  const b = badness(concern.key, concern.ui_score);
+  const level: Severity = b >= 55 ? "high" : b >= 35 ? "moderate" : "low";
   return (
     <div className="rise" style={{ animationDelay: `${0.05 * i}s` }}>
       <div className="flex justify-between text-sm mb-1">
@@ -103,7 +106,10 @@ function ProductCard({ p }: { p: MatchedProduct }) {
 export default function Reveal({ result }: { result: AnalyzeResult }) {
   const { scores, plan, products } = result;
   const topConcernKeys = new Set(plan.top_concerns.map((c) => c.concern));
-  const orderedConcerns = [...scores.concerns].sort((a, b) => b.ui_score - a.ui_score);
+  // Worst-first so the most-needing-attention concerns lead.
+  const orderedConcerns = [...scores.concerns].sort(
+    (a, b) => badness(b.key, b.ui_score) - badness(a.key, a.ui_score)
+  );
 
   return (
     <div className="space-y-8">
@@ -160,9 +166,15 @@ export default function Reveal({ result }: { result: AnalyzeResult }) {
       {/* Products */}
       <section>
         <h3 className="text-lg font-semibold mb-4">Recommended for your skin</h3>
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {products.map((p) => <ProductCard key={p.id} p={p} />)}
-        </div>
+        {products.length > 0 ? (
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {products.map((p) => <ProductCard key={p.id} p={p} />)}
+          </div>
+        ) : (
+          <div className="card p-6 text-sm" style={{ color: "var(--muted)" }}>
+            No matching products in the current catalog. Try widening your budget to see recommendations.
+          </div>
+        )}
       </section>
 
       {/* Cautions */}

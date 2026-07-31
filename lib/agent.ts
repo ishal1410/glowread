@@ -5,6 +5,7 @@
 
 import type { SkinScores, UserProfile, AgentPlan, TopConcern, RoutineStep, ProductCriterion, Severity } from "./types";
 import { CONCERN_INGREDIENTS } from "./products";
+import { badness } from "./metrics";
 
 const EXPLANATIONS: Record<string, string> = {
   wrinkle: "Fine lines are showing where skin moves and folds most. Consistent moisture and cell-turnover support help soften them over time.",
@@ -27,15 +28,21 @@ function severityOf(raw: number): Severity {
   return "low";
 }
 
-// Concern metrics: higher raw = worse. Pick the worst as "top concerns".
+// Rank by "badness" (polarity-aware): positive attributes like firmness only
+// count as a concern when they're LOW. Pick the worst 3 as "top concerns".
 export function buildPlanFromScores(scores: SkinScores, profile?: UserProfile): AgentPlan {
-  const ranked = [...scores.concerns].sort((a, b) => b.raw_score - a.raw_score);
+  const ranked = [...scores.concerns].sort(
+    (a, b) => badness(b.key, b.raw_score) - badness(a.key, a.raw_score)
+  );
   const top = ranked.slice(0, 3);
+
+  // Guard: empty/malformed analysis -> minimal safe plan (SPF + basics).
+  if (top.length === 0) return minimalPlan();
 
   const top_concerns: TopConcern[] = top.map((c) => ({
     concern: c.key,
     label: c.label,
-    severity: severityOf(c.raw_score),
+    severity: severityOf(badness(c.key, c.raw_score)),
     explanation: EXPLANATIONS[c.key] ?? `${c.label} is worth some focused care.`,
   }));
 
@@ -48,7 +55,7 @@ export function buildPlanFromScores(scores: SkinScores, profile?: UserProfile): 
       const k = `${c.key}:${ing}`;
       if (seen.has(k)) continue;
       seen.add(k);
-      product_criteria.push({ concern: c.key, ingredient: ing, category: "Serum", maxPrice: profile?.budget });
+      product_criteria.push({ concern: c.key, ingredient: ing, category: "Serum" });
     }
   }
 
@@ -75,6 +82,31 @@ export function buildPlanFromScores(scores: SkinScores, profile?: UserProfile): 
     top_concerns,
     routine: { AM, PM },
     product_criteria,
+    cautions: [],
+    source: "mock",
+  };
+}
+
+// Fallback when analysis returns no usable concerns.
+function minimalPlan(): AgentPlan {
+  return {
+    headline: "Here's a gentle, safe starter routine while we get a clearer read on your skin.",
+    top_concerns: [],
+    routine: {
+      AM: [
+        { order: 1, product_type: "Cleanser", ingredient: "glycerin", why: "Gentle start without stripping." },
+        { order: 2, product_type: "Moisturizer", ingredient: "hyaluronic acid", why: "Baseline hydration." },
+        { order: 3, product_type: "Sunscreen", ingredient: "spf", why: "Daily protection is the #1 step for everyone." },
+      ],
+      PM: [
+        { order: 1, product_type: "Cleanser", ingredient: "glycerin", why: "Remove the day's buildup." },
+        { order: 2, product_type: "Moisturizer", ingredient: "ceramides", why: "Repair the barrier overnight." },
+      ],
+    },
+    product_criteria: [
+      { concern: "hydration", ingredient: "hyaluronic acid", category: "Serum" },
+      { concern: "sun", ingredient: "spf", category: "Sunscreen" },
+    ],
     cautions: [],
     source: "mock",
   };

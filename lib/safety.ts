@@ -5,6 +5,13 @@ import type { AgentPlan, UserProfile } from "./types";
 
 // Ingredients to avoid for specific states.
 const PREGNANCY_AVOID = ["retinol", "retinoid", "salicylic acid", "benzoyl peroxide"];
+// Safe swaps when an active must be excluded (e.g. pregnancy).
+const SAFE_SUBSTITUTE: Record<string, string> = {
+  retinol: "azelaic acid",
+  retinoid: "azelaic acid",
+  "salicylic acid": "azelaic acid",
+  "benzoyl peroxide": "azelaic acid",
+};
 // Actives that should not be layered together in the same routine slot.
 const CONFLICTS: [string, string][] = [
   ["retinol", "glycolic acid"],
@@ -36,15 +43,34 @@ export function applySafety(plan: AgentPlan, profile?: UserProfile): SafetyResul
     );
   }
 
-  // Strip excluded ingredients from routine + criteria.
-  const clean = (ing: string) => !exclude.has(ing.toLowerCase());
+  // For an excluded ingredient, swap in a safe substitute; drop only if none.
+  const substitute = (ing: string): string | null => {
+    const key = ing.toLowerCase();
+    if (!exclude.has(key)) return ing;
+    const sub = SAFE_SUBSTITUTE[key];
+    return sub && !exclude.has(sub) ? sub : null;
+  };
+
+  const fixSteps = (steps: typeof plan.routine.AM) =>
+    steps
+      .map((s) => {
+        const sub = substitute(s.ingredient);
+        if (sub === null) return null;
+        return sub === s.ingredient
+          ? s
+          : { ...s, ingredient: sub, why: `${s.why} (pregnancy-safe alternative).` };
+      })
+      .filter((s): s is NonNullable<typeof s> => s !== null);
+
   const safePlan: AgentPlan = {
     ...plan,
-    routine: {
-      AM: plan.routine.AM.filter((s) => clean(s.ingredient)),
-      PM: plan.routine.PM.filter((s) => clean(s.ingredient)),
-    },
-    product_criteria: plan.product_criteria.filter((c) => clean(c.ingredient)),
+    routine: { AM: fixSteps(plan.routine.AM), PM: fixSteps(plan.routine.PM) },
+    product_criteria: plan.product_criteria
+      .map((c) => {
+        const sub = substitute(c.ingredient);
+        return sub === null ? null : { ...c, ingredient: sub };
+      })
+      .filter((c): c is NonNullable<typeof c> => c !== null),
   };
 
   // Detect conflicting actives within the same slot; warn + note to alternate.
@@ -70,6 +96,10 @@ export function applySafety(plan: AgentPlan, profile?: UserProfile): SafetyResul
     });
     safePlan.product_criteria.push({ concern: "sun", ingredient: "spf", category: "Sunscreen" });
   }
+
+  // Re-sequence step numbers so no gaps remain after swaps/filters/SPF append.
+  safePlan.routine.AM = safePlan.routine.AM.map((s, i) => ({ ...s, order: i + 1 }));
+  safePlan.routine.PM = safePlan.routine.PM.map((s, i) => ({ ...s, order: i + 1 }));
 
   return { plan: safePlan, excludeIngredients: [...exclude], warnings };
 }

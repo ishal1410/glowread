@@ -40,9 +40,9 @@ Selfie ─▶ /api/analyze ─▶ skinClient (Perfect Corp, 4-step async)  ─�
 
 ### Key design decisions (the "why" — interview/judge prep)
 
-- **LLM reasons, code retrieves.** The LLM never picks product brands — a deterministic matcher does. This prevents hallucinated products and makes every recommendation explainable and testable.
-- **Deterministic core, LLM as narration.** The plan's structure is always built in code, so the output schema can never break. The LLM only makes the wording warmer. Robust by construction.
-- **`raw_score` vs `ui_score`.** The agent reasons on the accurate raw score; the UI shows the gentler consumer-calibrated score.
+- **Deterministic reasoning, LLM narration.** All reasoning — ranking concerns, building the routine, choosing product criteria — happens in code (`buildPlanFromScores`). The LLM only rewrites the headline and explanations in a warmer voice. So the output schema can never break, and every recommendation is explainable and testable. (This is a deliberate, safer choice than an autonomous LLM agent.)
+- **Code retrieves products, never the LLM.** A deterministic matcher maps ingredients → real catalog products, so no product is ever hallucinated.
+- **`raw_score` vs `ui_score`.** The deterministic core reasons on the accurate raw score; the UI shows the gentler consumer-calibrated score.
 - **Privacy by default.** Selfies are analyzed, not stored. No accounts in the MVP.
 - **Safety is not the model's job.** Cosmetic-safety rules are enforced in code after the plan, independent of the LLM.
 

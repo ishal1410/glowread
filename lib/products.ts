@@ -87,7 +87,8 @@ export function matchProducts(
   }
 
   const scored = CATALOG.filter((p) => {
-    if (budget && p.price > budget) return false;
+    // Sunscreen is essential and always shown, regardless of budget.
+    if (budget && p.price > budget && p.category !== "Sunscreen") return false;
     if (p.key_ingredients.some((i) => excludeIngredients.includes(i.toLowerCase()))) return false;
     return true;
   }).map((p) => {
@@ -103,8 +104,14 @@ export function matchProducts(
     return { product: { ...p, matchedFor: [...new Set(matchedFor)] }, score };
   });
 
-  return scored
+  const matched = scored
     .filter((s) => s.score > 0)
     .sort((a, b) => b.score - a.score || a.product.price - b.product.price)
     .map((s) => s.product);
+
+  // Fallback: if the budget filtered everything out, retry without the cap
+  // rather than showing an empty grid.
+  if (matched.length === 0 && budget) return matchProducts(criteria, undefined, excludeIngredients);
+
+  return matched;
 }

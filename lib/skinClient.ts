@@ -2,7 +2,7 @@
 // Mock is the default (P11) so dev/demo never burns the 40 free units.
 
 import type { SkinScores, ConcernScore } from "./types";
-import { getMockScores, MOCK_VARIANTS } from "./mockSkin";
+import { getMockScores, MOCK_VARIANTS, CONCERN_LABELS } from "./mockSkin";
 
 const BASE = "https://yce.perfectcorp.com";
 const CONCERNS = ["wrinkle", "pore", "texture", "acne", "spot", "redness", "oiliness", "moisture", "dark_circle", "firmness", "radiance"];
@@ -12,19 +12,23 @@ export function isRealMode(): boolean {
 }
 
 // Entry point used by the API route.
-export async function analyzeSkin(imageBuffer: Buffer | null, opts?: { variant?: string }): Promise<SkinScores> {
+export async function analyzeSkin(
+  imageBuffer: Buffer | null,
+  opts?: { variant?: string; mime?: string }
+): Promise<SkinScores> {
   if (!isRealMode() || !imageBuffer) {
     // Deterministic-ish variety across demo runs.
-    const variant = (opts?.variant && MOCK_VARIANTS.includes(opts.variant)
+    const variant = opts?.variant && MOCK_VARIANTS.includes(opts.variant)
       ? opts.variant
-      : MOCK_VARIANTS[imageBuffer ? imageBuffer.length % MOCK_VARIANTS.length : 0]) as string;
-    return getMockScores(variant as never);
+      : MOCK_VARIANTS[imageBuffer ? imageBuffer.length % MOCK_VARIANTS.length : 0];
+    return getMockScores(variant);
   }
-  return analyzeSkinReal(imageBuffer);
+  return analyzeSkinReal(imageBuffer, opts?.mime ?? "image/jpeg");
 }
 
 // Real Perfect Corp flow. Kept isolated so the mock path is untouched.
-async function analyzeSkinReal(imageBuffer: Buffer): Promise<SkinScores> {
+// NOTE: before real submission, resize to long<=4096 / short>=1080 (e.g. sharp).
+async function analyzeSkinReal(imageBuffer: Buffer, mime: string): Promise<SkinScores> {
   const key = process.env.PERFECTCORP_API_KEY!;
   const auth = { Authorization: `Bearer ${key}` };
 
@@ -32,7 +36,7 @@ async function analyzeSkinReal(imageBuffer: Buffer): Promise<SkinScores> {
   const initRes = await fetch(`${BASE}/s2s/v2.0/file/skin-analysis`, {
     method: "POST",
     headers: { ...auth, "Content-Type": "application/json" },
-    body: JSON.stringify({ files: [{ content_type: "image/jpeg", file_name: "selfie.jpg", file_size: imageBuffer.length }] }),
+    body: JSON.stringify({ files: [{ content_type: mime, file_name: "selfie", file_size: imageBuffer.length }] }),
   });
   if (!initRes.ok) throw new Error(`file init failed: ${initRes.status}`);
   const init = await initRes.json();
@@ -42,7 +46,7 @@ async function analyzeSkinReal(imageBuffer: Buffer): Promise<SkinScores> {
   if (!uploadUrl || !fileId) throw new Error("file init: missing url/file_id");
 
   // 2) PUT the image to the presigned URL
-  const put = await fetch(uploadUrl, { method: "PUT", headers: { "Content-Type": "image/jpeg" }, body: new Uint8Array(imageBuffer) });
+  const put = await fetch(uploadUrl, { method: "PUT", headers: { "Content-Type": mime }, body: new Uint8Array(imageBuffer) });
   if (!put.ok) throw new Error(`upload failed: ${put.status}`);
 
   // 3) create task -> task_id
@@ -78,7 +82,7 @@ function parseRealResult(p: unknown): SkinScores {
   const raw = (result.results ?? result.scores ?? {}) as Record<string, { raw_score?: number; ui_score?: number; score?: number }>;
   const concerns: ConcernScore[] = Object.entries(raw).map(([key, v]) => ({
     key,
-    label: key.charAt(0).toUpperCase() + key.slice(1),
+    label: CONCERN_LABELS[key] ?? key.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase()),
     raw_score: v.raw_score ?? v.score ?? 0,
     ui_score: v.ui_score ?? v.raw_score ?? v.score ?? 0,
   }));

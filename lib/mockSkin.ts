@@ -3,7 +3,7 @@
 
 import type { SkinScores } from "./types";
 
-const CONCERN_LABELS: Record<string, string> = {
+export const CONCERN_LABELS: Record<string, string> = {
   wrinkle: "Wrinkles",
   firmness: "Firmness",
   pore: "Pores",
@@ -43,7 +43,7 @@ function toUi(raw: number): number {
   return Math.round(Math.min(100, Math.max(0, raw * 0.85 + 8)));
 }
 
-export function getMockScores(variant: keyof typeof PROFILES = "balanced"): SkinScores {
+export function getMockScores(variant: string = "balanced"): SkinScores {
   const p = PROFILES[variant] ?? PROFILES.balanced;
   const concerns = Object.entries(p.raw).map(([key, raw]) => ({
     key,
