@@ -17,12 +17,10 @@ export interface SkinScores {
 }
 
 export interface UserProfile {
-  age?: number;
   skinType?: "dry" | "oily" | "combination" | "normal" | "sensitive";
   budget?: number;         // max per product, USD
   pregnant?: boolean;
   sensitive?: boolean;
-  goals?: string[];
 }
 
 export interface TopConcern {
@@ -43,7 +41,6 @@ export interface ProductCriterion {
   concern: string;
   ingredient: string;
   category: string;
-  maxPrice?: number;
 }
 
 export interface AgentPlan {
@@ -52,7 +49,7 @@ export interface AgentPlan {
   routine: { AM: RoutineStep[]; PM: RoutineStep[] };
   product_criteria: ProductCriterion[];
   cautions: string[];
-  source: "mock" | "gemini" | "claude";
+  source: "mock" | "gemini";
 }
 
 export interface Product {
@@ -61,9 +58,7 @@ export interface Product {
   brand: string;
   category: string;
   key_ingredients: string[];
-  targets: string[];       // concern keys / ingredient tags it addresses
   price: number;           // indicative USD
-  currency: string;
   priceNote: string;       // e.g. "approx., as of 2026-07"
   url: string;
 }

@@ -83,6 +83,8 @@ export default function Home() {
     fd.append("image", f);
     fd.append("profile", JSON.stringify(profile));
     runAnalyze(fd);
+    // Clear so re-selecting the SAME file still fires onChange next time.
+    e.target.value = "";
   }
 
   function runDemo() {
@@ -100,7 +102,7 @@ export default function Home() {
   }
 
   return (
-    <main className="max-w-5xl mx-auto px-5 py-8 w-full">
+    <main className="max-w-6xl mx-auto px-5 py-8 w-full">
       {/* Header */}
       <header className="flex items-center justify-between mb-10">
         <div className="flex items-center gap-2">
@@ -114,7 +116,7 @@ export default function Home() {
       </header>
 
       {phase === "idle" && (
-        <section className="text-center max-w-2xl mx-auto rise">
+        <section className="text-center max-w-2xl mx-auto rise min-h-[76vh] flex flex-col justify-center">
           <div className="eyebrow mb-5">AI skin analysis · routine · real products</div>
           <h1 className="display" style={{ fontSize: "clamp(2.6rem, 7vw, 4.2rem)" }}>
             Read your skin like<br />

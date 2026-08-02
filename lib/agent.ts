@@ -3,9 +3,9 @@
 // layer (Gemini free, or Claude) rewrites the wording more naturally. If the LLM
 // is absent or returns bad output, we fall back to the deterministic plan (P16).
 
-import type { SkinScores, UserProfile, AgentPlan, TopConcern, RoutineStep, ProductCriterion, Severity } from "./types";
+import type { SkinScores, AgentPlan, TopConcern, RoutineStep, ProductCriterion } from "./types";
 import { CONCERN_INGREDIENTS } from "./products";
-import { badness } from "./metrics";
+import { badness, severityOf, rankByBadness } from "./metrics";
 
 const EXPLANATIONS: Record<string, string> = {
   wrinkle: "Fine lines are starting to show where your face moves most. Moisturizing well and using a retinoid at night softens them over time.",
@@ -22,18 +22,10 @@ const EXPLANATIONS: Record<string, string> = {
   radiance: "Your skin looks a little dull. Antioxidants and gentle exfoliation bring the glow back.",
 };
 
-function severityOf(raw: number): Severity {
-  if (raw >= 55) return "high";
-  if (raw >= 35) return "moderate";
-  return "low";
-}
-
 // Rank by "badness" (polarity-aware): positive attributes like firmness only
 // count as a concern when they're LOW. Pick the worst 3 as "top concerns".
-export function buildPlanFromScores(scores: SkinScores, profile?: UserProfile): AgentPlan {
-  const ranked = [...scores.concerns].sort(
-    (a, b) => badness(b.key, b.raw_score) - badness(a.key, a.raw_score)
-  );
+export function buildPlanFromScores(scores: SkinScores): AgentPlan {
+  const ranked = rankByBadness(scores.concerns, "raw_score");
   const top = ranked.slice(0, 3);
 
   // Guard: empty/malformed analysis -> minimal safe plan (SPF + basics).
@@ -112,44 +104,65 @@ function minimalPlan(): AgentPlan {
   };
 }
 
-// Public entry. Uses Gemini/Claude if configured; otherwise deterministic.
-export async function getPlan(scores: SkinScores, profile?: UserProfile): Promise<AgentPlan> {
-  const base = buildPlanFromScores(scores, profile);
+// Public entry. Uses the LLM narration layer if configured; otherwise
+// deterministic. On invalid/failed LLM output we retry once, then fall back to
+// the deterministic plan (P16) so the response can never break.
+export async function getPlan(scores: SkinScores): Promise<AgentPlan> {
+  const base = buildPlanFromScores(scores);
 
   const geminiKey = process.env.GEMINI_API_KEY;
   if (!geminiKey) return base; // mock-first default
 
-  try {
-    const enriched = await enrichWithGemini(base, scores, profile, geminiKey);
-    return enriched ?? base;
-  } catch {
-    return base; // P16: fall back on any LLM failure
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const enriched = await enrichWithGemini(base, geminiKey);
+      if (enriched) return enriched;
+    } catch {
+      // fall through to retry, then to the deterministic base
+    }
   }
+  return base;
+}
+
+// Validate the LLM's narration against the expected schema. Returns null (which
+// triggers a retry, then fallback) on any shape mismatch, and bounds string
+// lengths so a malfunctioning model can't return unbounded text.
+type Narration = { headline?: string; explanations?: Record<string, string> };
+function validateNarration(x: unknown): Narration | null {
+  if (!x || typeof x !== "object") return null;
+  const o = x as Record<string, unknown>;
+  const headline = typeof o.headline === "string" ? o.headline.slice(0, 300) : undefined;
+  let explanations: Record<string, string> | undefined;
+  if (o.explanations && typeof o.explanations === "object") {
+    explanations = {};
+    for (const [k, v] of Object.entries(o.explanations as Record<string, unknown>)) {
+      if (typeof v === "string") explanations[k] = v.slice(0, 600);
+    }
+  }
+  if (headline === undefined && !explanations) return null; // nothing usable
+  return { headline, explanations };
 }
 
 // LLM narration layer: rewrite headline + explanations in a warmer voice.
 // Structure (concerns, routine, criteria) stays from the deterministic core,
 // so the output schema can never break.
-async function enrichWithGemini(
-  base: AgentPlan,
-  scores: SkinScores,
-  profile: UserProfile | undefined,
-  apiKey: string
-): Promise<AgentPlan | null> {
+async function enrichWithGemini(base: AgentPlan, apiKey: string): Promise<AgentPlan | null> {
   const prompt = `You are a warm, encouraging cosmetic skincare coach (NOT a doctor; never diagnose).
 Given these top concerns, rewrite ONLY the "headline" and each concern "explanation" in plain, friendly language.
 Do NOT mention numeric scores. Return strict JSON: {"headline": string, "explanations": {"<concernKey>": string}}.
 Top concerns: ${JSON.stringify(base.top_concerns.map((c) => ({ key: c.concern, label: c.label, severity: c.severity })))}`;
 
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      // Key in a header, never the URL (query strings leak into proxy/access logs).
+      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: { responseMimeType: "application/json" },
       }),
+      signal: AbortSignal.timeout(15000),
     }
   );
   if (!res.ok) return null;
@@ -157,7 +170,9 @@ Top concerns: ${JSON.stringify(base.top_concerns.map((c) => ({ key: c.concern, l
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) return null;
 
-  const parsed = JSON.parse(text) as { headline?: string; explanations?: Record<string, string> };
+  const parsed = validateNarration(JSON.parse(text));
+  if (!parsed) return null; // invalid schema -> caller retries, then falls back
+
   return {
     ...base,
     source: "gemini",

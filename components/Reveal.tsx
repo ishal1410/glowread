@@ -1,17 +1,17 @@
-import type { AnalyzeResult, ConcernScore, RoutineStep, MatchedProduct, Severity } from "@/lib/types";
-import { INGREDIENT_RATIONALE } from "@/lib/products";
-import { badness } from "@/lib/metrics";
+import type { AnalyzeResult, ConcernScore, RoutineStep, MatchedProduct } from "@/lib/types";
+import { INGREDIENT_RATIONALE, INGREDIENT_SOURCES } from "@/lib/products";
+import { badness, severityOf, SEV_COLOR, rankByBadness } from "@/lib/metrics";
+import { CONCERN_LABELS } from "@/lib/mockSkin";
 import RadialMap from "./RadialMap";
 
-const sevColor: Record<Severity, string> = {
-  high: "var(--high)",
-  moderate: "var(--mid)",
-  low: "var(--good)",
-};
+// Human label for a concern key ("dark_circle" -> "Dark Circles"), with a
+// prettify fallback for keys not in the map (e.g. "sun").
+const labelForConcern = (k: string) =>
+  CONCERN_LABELS[k] ?? k.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
 
 function ConcernBar({ concern }: { concern: ConcernScore }) {
   const b = badness(concern.key, concern.ui_score);
-  const level: Severity = b >= 55 ? "high" : b >= 35 ? "moderate" : "low";
+  const level = severityOf(b);
   return (
     <div>
       <div className="flex justify-between text-sm mb-1.5">
@@ -20,7 +20,7 @@ function ConcernBar({ concern }: { concern: ConcernScore }) {
       </div>
       <div className="h-2 rounded-full overflow-hidden" style={{ background: "var(--surface-2)" }}>
         <div className="h-full rounded-full"
-          style={{ width: `${concern.ui_score}%`, background: sevColor[level], transition: "width 1s ease" }} />
+          style={{ width: `${concern.ui_score}%`, background: SEV_COLOR[level], transition: "width 1s ease" }} />
       </div>
     </div>
   );
@@ -74,7 +74,7 @@ function ProductCard({ p }: { p: MatchedProduct }) {
         ))}
       </div>
       <div className="mono text-[11px] mt-3" style={{ color: "var(--muted)" }}>
-        {p.category} · targets {p.matchedFor.join(", ")}
+        {p.category} · targets {p.matchedFor.map(labelForConcern).join(", ")}
       </div>
     </a>
   );
@@ -82,15 +82,13 @@ function ProductCard({ p }: { p: MatchedProduct }) {
 
 export default function Reveal({ result }: { result: AnalyzeResult }) {
   const { scores, plan, products } = result;
-  const orderedConcerns = [...scores.concerns].sort(
-    (a, b) => badness(b.key, b.ui_score) - badness(a.key, a.ui_score)
-  );
+  const orderedConcerns = rankByBadness(scores.concerns, "raw_score");
 
   return (
     <div className="space-y-8">
       {/* Signature: the skin-map + headline */}
       <section className="card p-8 rise flex flex-col md:flex-row items-center gap-10">
-        <div className="shrink-0"><RadialMap concerns={scores.concerns} healthScore={scores.healthScore} /></div>
+        <div className="shrink-0 max-w-full"><RadialMap concerns={scores.concerns} healthScore={scores.healthScore} /></div>
         <div className="flex-1 text-center md:text-left">
           <div className="eyebrow mb-3">
             {scores.source === "mock" ? "demo analysis" : "perfect corp analysis"} · est. skin age {scores.skinAge}
@@ -99,7 +97,7 @@ export default function Reveal({ result }: { result: AnalyzeResult }) {
           <div className="flex flex-wrap gap-2 mt-5 justify-center md:justify-start">
             {plan.top_concerns.map((c) => (
               <span key={c.concern} className="chip"
-                style={{ borderColor: sevColor[c.severity], color: sevColor[c.severity] }}>
+                style={{ borderColor: SEV_COLOR[c.severity], color: SEV_COLOR[c.severity] }}>
                 {c.label} · {c.severity}
               </span>
             ))}
@@ -111,8 +109,8 @@ export default function Reveal({ result }: { result: AnalyzeResult }) {
       {plan.top_concerns.length > 0 && (
         <section className="grid md:grid-cols-3 gap-4">
           {plan.top_concerns.map((c, i) => (
-            <div key={c.concern} className="card p-6 rise" style={{ animationDelay: `${0.08 * i}s` }}>
-              <div className="mono text-xs mb-3" style={{ color: sevColor[c.severity] }}>
+            <div key={c.concern} className="card p-6 rise">
+              <div className="mono text-xs mb-3" style={{ color: SEV_COLOR[c.severity] }}>
                 {String(i + 1).padStart(2, "0")} / {c.severity}
               </div>
               <h3 className="font-semibold mb-1">{c.label}</h3>
@@ -154,6 +152,17 @@ export default function Reveal({ result }: { result: AnalyzeResult }) {
             No matching products in the current catalog. Widen your budget to see recommendations.
           </div>
         )}
+        {/* Cited, not asserted: the ingredient guidance references established
+            cosmetic dermatology authorities. */}
+        <p className="mono text-[11px] mt-4" style={{ color: "var(--muted)" }}>
+          Ingredient guidance based on general cosmetic dermatology sources:{" "}
+          {INGREDIENT_SOURCES.map((s, i) => (
+            <span key={s.url}>
+              {i > 0 && " · "}
+              <a href={s.url} target="_blank" rel="noopener noreferrer" className="link-accent">{s.label}</a>
+            </span>
+          ))}
+        </p>
       </section>
 
       {/* Cautions */}

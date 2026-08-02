@@ -54,9 +54,13 @@
 
 body {
   background:
+    /* Central pool of light so the centered column sits anchored in atmosphere
+       on wide screens, instead of floating in empty margins. */
+    radial-gradient(1100px 760px at 50% 20%, color-mix(in srgb, var(--violet) 7%, transparent), transparent 62%),
     radial-gradient(900px 520px at 82% -8%, var(--violet-soft), transparent 70%),
     radial-gradient(720px 480px at -8% 4%, color-mix(in srgb, var(--violet) 12%, transparent), transparent 70%),
     var(--bg);
+  background-attachment: fixed;
   color: var(--text);
   font-family: var(--font-geist-sans), system-ui, sans-serif;
   min-height: 100vh;
@@ -121,13 +125,15 @@ body {
 .link-accent:hover { text-decoration: underline; }
 
 /* Motion */
-@keyframes riseIn { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+/* Slide only, no opacity fade — content stays fully legible on load so it
+   never reads as faint/clipped/blank mid-animation. */
+@keyframes riseIn { from { transform: translateY(10px); } to { transform: translateY(0); } }
 @keyframes glowBloom { from { opacity: 0; filter: blur(20px); } to { opacity: 1; filter: blur(0); } }
 @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
 @keyframes scanSweep { 0% { transform: translateY(-120%); } 100% { transform: translateY(120%); } }
 @keyframes spinSlow { to { transform: rotate(360deg); } }
 
-.rise { animation: riseIn 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.rise { animation: riseIn 0.4s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
 .bloom { animation: glowBloom 0.9s ease both; }
 .spin-slow { animation: spinSlow 26s linear infinite; }
 .skeleton {

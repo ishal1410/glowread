@@ -2,17 +2,13 @@
 
 import { useEffect, useState } from "react";
 import type { ConcernScore } from "@/lib/types";
-import { badness } from "@/lib/metrics";
+import { badness, severityOf, SEV_COLOR, rankByBadness } from "@/lib/metrics";
 
 const SIZE = 340;
 const C = SIZE / 2;
 const R_IN = 66;
 const R_MAX = 150;
 const PAD = 3; // degrees between wedges
-
-function sevVar(b: number): string {
-  return b >= 55 ? "var(--high)" : b >= 35 ? "var(--mid)" : "var(--good)";
-}
 
 function point(r: number, deg: number) {
   const t = (deg * Math.PI) / 180;
@@ -24,7 +20,10 @@ function sectorPath(rIn: number, rOut: number, a0: number, a1: number) {
   const p1 = point(rOut, a1);
   const p2 = point(rIn, a1);
   const p3 = point(rIn, a0);
-  return `M ${p0.x} ${p0.y} A ${rOut} ${rOut} 0 0 1 ${p1.x} ${p1.y} L ${p2.x} ${p2.y} A ${rIn} ${rIn} 0 0 0 ${p3.x} ${p3.y} Z`;
+  // Pick the correct arc side: a single-concern wedge spans ~357°, which needs
+  // the large-arc-flag set or the SVG draws a thin sliver instead.
+  const large = a1 - a0 > 180 ? 1 : 0;
+  return `M ${p0.x} ${p0.y} A ${rOut} ${rOut} 0 ${large} 1 ${p1.x} ${p1.y} L ${p2.x} ${p2.y} A ${rIn} ${rIn} 0 ${large} 0 ${p3.x} ${p3.y} Z`;
 }
 
 function useReducedMotion() {
@@ -55,15 +54,16 @@ export default function RadialMap({ concerns, healthScore }: { concerns: Concern
     return () => cancelAnimationFrame(raf);
   }, [healthScore, reduced]);
 
-  // Worst-first, arranged clockwise from the top.
-  const ranked = [...concerns].sort((a, b) => badness(b.key, b.ui_score) - badness(a.key, a.ui_score));
+  // Worst-first, arranged clockwise from the top. Ranked on raw_score so the
+  // order matches the top-concern chips and the breakdown list.
+  const ranked = rankByBadness(concerns, "raw_score");
   const n = Math.max(ranked.length, 1);
   const step = 360 / n;
   const healthColor = healthScore >= 70 ? "var(--good)" : healthScore >= 50 ? "var(--mid)" : "var(--high)";
 
   return (
-    <div className="relative" style={{ width: SIZE, height: SIZE }}>
-      <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`} role="img"
+    <div className="relative" style={{ width: SIZE, maxWidth: "100%", aspectRatio: "1 / 1" }}>
+      <svg width="100%" height="100%" viewBox={`0 0 ${SIZE} ${SIZE}`} role="img"
         aria-label={`Skin health ${healthScore} of 100 with ${concerns.length} measured concerns`}>
         <defs>
           <radialGradient id="lens" cx="50%" cy="50%" r="50%">
@@ -93,7 +93,7 @@ export default function RadialMap({ concerns, healthScore }: { concerns: Concern
             const a1 = (i + 1) * step - PAD / 2;
             return (
               <path key={c.key} d={sectorPath(R_IN, Math.max(R_IN + 3, rOut), a0, a1)}
-                fill={sevVar(b)} fillOpacity="0.9" />
+                fill={SEV_COLOR[severityOf(b)]} fillOpacity="0.9" />
             );
           })}
         </g>

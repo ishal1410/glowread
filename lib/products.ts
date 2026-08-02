@@ -47,29 +47,39 @@ export const INGREDIENT_RATIONALE: Record<string, string> = {
   spf: "Broad-spectrum sunscreen; the single most effective anti-aging step.",
 };
 
+// Citations for the ingredient guidance above — general, well-established
+// cosmetic dermatology references (not medical advice). Surfaced in the UI so
+// the mapping is *cited*, not asserted.
+export const INGREDIENT_SOURCES: { label: string; url: string }[] = [
+  { label: "American Academy of Dermatology — skin care & ingredients", url: "https://www.aad.org/public/everyday-care/skin-care-basics" },
+  { label: "NIH / PubMed — peer-reviewed cosmetic dermatology literature", url: "https://pubmed.ncbi.nlm.nih.gov" },
+  { label: "DermNet — evidence-based dermatology reference", url: "https://dermnetnz.org" },
+];
+
 // Real, widely-available products. Prices indicative (approx., as of 2026-07).
+// Matching is by key_ingredients only, so no per-product concern tags are stored.
 const AS_OF = "approx., as of 2026-07";
 export const CATALOG: Product[] = [
-  { id: "to-nia", name: "Niacinamide 10% + Zinc 1%", brand: "The Ordinary", category: "Serum", key_ingredients: ["niacinamide"], targets: ["pore", "oiliness", "acne", "redness"], price: 6, currency: "USD", priceNote: AS_OF, url: "https://theordinary.com" },
-  { id: "to-ha", name: "Hyaluronic Acid 2% + B5", brand: "The Ordinary", category: "Serum", key_ingredients: ["hyaluronic acid"], targets: ["hydration", "moisture"], price: 9, currency: "USD", priceNote: AS_OF, url: "https://theordinary.com" },
-  { id: "to-retinol", name: "Retinol 0.5% in Squalane", brand: "The Ordinary", category: "Serum", key_ingredients: ["retinol"], targets: ["wrinkle", "firmness", "age", "texture"], price: 8, currency: "USD", priceNote: AS_OF, url: "https://theordinary.com" },
-  { id: "to-azelaic", name: "Azelaic Acid Suspension 10%", brand: "The Ordinary", category: "Treatment", key_ingredients: ["azelaic acid"], targets: ["redness", "pigmentation", "spot", "acne"], price: 12, currency: "USD", priceNote: AS_OF, url: "https://theordinary.com" },
-  { id: "to-vitc", name: "Vitamin C Suspension 23%", brand: "The Ordinary", category: "Serum", key_ingredients: ["vitamin c"], targets: ["spot", "pigmentation", "radiance", "wrinkle"], price: 8, currency: "USD", priceNote: AS_OF, url: "https://theordinary.com" },
-  { id: "to-glycolic", name: "Glycolic Acid 7% Toning Solution", brand: "The Ordinary", category: "Exfoliant", key_ingredients: ["glycolic acid"], targets: ["texture", "radiance"], price: 9, currency: "USD", priceNote: AS_OF, url: "https://theordinary.com" },
-  { id: "to-caffeine", name: "Caffeine Solution 5% + EGCG", brand: "The Ordinary", category: "Eye", key_ingredients: ["caffeine"], targets: ["dark_circle"], price: 8, currency: "USD", priceNote: AS_OF, url: "https://theordinary.com" },
-  { id: "cerave-cleanser", name: "Foaming Facial Cleanser", brand: "CeraVe", category: "Cleanser", key_ingredients: ["ceramides", "niacinamide"], targets: ["oiliness", "moisture"], price: 15, currency: "USD", priceNote: AS_OF, url: "https://www.cerave.com" },
-  { id: "cerave-hydrating-cleanser", name: "Hydrating Facial Cleanser", brand: "CeraVe", category: "Cleanser", key_ingredients: ["ceramides", "hyaluronic acid"], targets: ["hydration", "moisture"], price: 15, currency: "USD", priceNote: AS_OF, url: "https://www.cerave.com" },
-  { id: "cerave-moisturizer", name: "Moisturizing Cream", brand: "CeraVe", category: "Moisturizer", key_ingredients: ["ceramides", "hyaluronic acid"], targets: ["hydration", "moisture"], price: 17, currency: "USD", priceNote: AS_OF, url: "https://www.cerave.com" },
-  { id: "cerave-pm", name: "Skin Renewing Night Cream", brand: "CeraVe", category: "Moisturizer", key_ingredients: ["peptides", "ceramides"], targets: ["firmness", "age", "moisture"], price: 18, currency: "USD", priceNote: AS_OF, url: "https://www.cerave.com" },
-  { id: "lrp-bha", name: "Effaclar Salicylic Acid Serum", brand: "La Roche-Posay", category: "Serum", key_ingredients: ["salicylic acid"], targets: ["acne", "pore", "texture", "oiliness"], price: 30, currency: "USD", priceNote: AS_OF, url: "https://www.laroche-posay.us" },
-  { id: "lrp-b5", name: "Cicaplast Baume B5", brand: "La Roche-Posay", category: "Treatment", key_ingredients: ["centella", "glycerin"], targets: ["redness", "moisture"], price: 15, currency: "USD", priceNote: AS_OF, url: "https://www.laroche-posay.us" },
-  { id: "lrp-spf", name: "Anthelios Mineral SPF 50", brand: "La Roche-Posay", category: "Sunscreen", key_ingredients: ["spf"], targets: ["sun"], price: 34, currency: "USD", priceNote: AS_OF, url: "https://www.laroche-posay.us" },
-  { id: "eltamd-spf", name: "UV Clear SPF 46", brand: "EltaMD", category: "Sunscreen", key_ingredients: ["spf", "niacinamide"], targets: ["sun", "redness", "acne"], price: 41, currency: "USD", priceNote: AS_OF, url: "https://eltamd.com" },
-  { id: "paula-bha", name: "Skin Perfecting 2% BHA Liquid", brand: "Paula's Choice", category: "Exfoliant", key_ingredients: ["salicylic acid"], targets: ["pore", "acne", "texture", "oiliness"], price: 35, currency: "USD", priceNote: AS_OF, url: "https://www.paulaschoice.com" },
-  { id: "paula-vitc", name: "C15 Super Booster", brand: "Paula's Choice", category: "Serum", key_ingredients: ["vitamin c"], targets: ["radiance", "spot", "pigmentation"], price: 52, currency: "USD", priceNote: AS_OF, url: "https://www.paulaschoice.com" },
-  { id: "neutrogena-ha", name: "Hydro Boost Water Gel", brand: "Neutrogena", category: "Moisturizer", key_ingredients: ["hyaluronic acid"], targets: ["hydration", "moisture", "oiliness"], price: 20, currency: "USD", priceNote: AS_OF, url: "https://www.neutrogena.com" },
-  { id: "cetaphil-cleanser", name: "Gentle Skin Cleanser", brand: "Cetaphil", category: "Cleanser", key_ingredients: ["glycerin"], targets: ["moisture", "redness"], price: 13, currency: "USD", priceNote: AS_OF, url: "https://www.cetaphil.com" },
-  { id: "inkey-peptide", name: "Peptide Moisturizer", brand: "The INKEY List", category: "Moisturizer", key_ingredients: ["peptides"], targets: ["firmness", "age"], price: 15, currency: "USD", priceNote: AS_OF, url: "https://www.theinkeylist.com" },
+  { id: "to-nia", name: "Niacinamide 10% + Zinc 1%", brand: "The Ordinary", category: "Serum", key_ingredients: ["niacinamide"], price: 6, priceNote: AS_OF, url: "https://theordinary.com" },
+  { id: "to-ha", name: "Hyaluronic Acid 2% + B5", brand: "The Ordinary", category: "Serum", key_ingredients: ["hyaluronic acid"], price: 9, priceNote: AS_OF, url: "https://theordinary.com" },
+  { id: "to-retinol", name: "Retinol 0.5% in Squalane", brand: "The Ordinary", category: "Serum", key_ingredients: ["retinol"], price: 8, priceNote: AS_OF, url: "https://theordinary.com" },
+  { id: "to-azelaic", name: "Azelaic Acid Suspension 10%", brand: "The Ordinary", category: "Treatment", key_ingredients: ["azelaic acid"], price: 12, priceNote: AS_OF, url: "https://theordinary.com" },
+  { id: "to-vitc", name: "Vitamin C Suspension 23%", brand: "The Ordinary", category: "Serum", key_ingredients: ["vitamin c"], price: 8, priceNote: AS_OF, url: "https://theordinary.com" },
+  { id: "to-glycolic", name: "Glycolic Acid 7% Toning Solution", brand: "The Ordinary", category: "Exfoliant", key_ingredients: ["glycolic acid"], price: 9, priceNote: AS_OF, url: "https://theordinary.com" },
+  { id: "to-caffeine", name: "Caffeine Solution 5% + EGCG", brand: "The Ordinary", category: "Eye", key_ingredients: ["caffeine"], price: 8, priceNote: AS_OF, url: "https://theordinary.com" },
+  { id: "cerave-cleanser", name: "Foaming Facial Cleanser", brand: "CeraVe", category: "Cleanser", key_ingredients: ["ceramides", "niacinamide"], price: 15, priceNote: AS_OF, url: "https://www.cerave.com" },
+  { id: "cerave-hydrating-cleanser", name: "Hydrating Facial Cleanser", brand: "CeraVe", category: "Cleanser", key_ingredients: ["ceramides", "hyaluronic acid"], price: 15, priceNote: AS_OF, url: "https://www.cerave.com" },
+  { id: "cerave-moisturizer", name: "Moisturizing Cream", brand: "CeraVe", category: "Moisturizer", key_ingredients: ["ceramides", "hyaluronic acid"], price: 17, priceNote: AS_OF, url: "https://www.cerave.com" },
+  { id: "cerave-pm", name: "Skin Renewing Night Cream", brand: "CeraVe", category: "Moisturizer", key_ingredients: ["peptides", "ceramides"], price: 18, priceNote: AS_OF, url: "https://www.cerave.com" },
+  { id: "lrp-bha", name: "Effaclar Salicylic Acid Serum", brand: "La Roche-Posay", category: "Serum", key_ingredients: ["salicylic acid"], price: 30, priceNote: AS_OF, url: "https://www.laroche-posay.us" },
+  { id: "lrp-b5", name: "Cicaplast Baume B5", brand: "La Roche-Posay", category: "Treatment", key_ingredients: ["centella", "glycerin"], price: 15, priceNote: AS_OF, url: "https://www.laroche-posay.us" },
+  { id: "lrp-spf", name: "Anthelios Mineral SPF 50", brand: "La Roche-Posay", category: "Sunscreen", key_ingredients: ["spf"], price: 34, priceNote: AS_OF, url: "https://www.laroche-posay.us" },
+  { id: "eltamd-spf", name: "UV Clear SPF 46", brand: "EltaMD", category: "Sunscreen", key_ingredients: ["spf", "niacinamide"], price: 41, priceNote: AS_OF, url: "https://eltamd.com" },
+  { id: "paula-bha", name: "Skin Perfecting 2% BHA Liquid", brand: "Paula's Choice", category: "Exfoliant", key_ingredients: ["salicylic acid"], price: 35, priceNote: AS_OF, url: "https://www.paulaschoice.com" },
+  { id: "paula-vitc", name: "C15 Super Booster", brand: "Paula's Choice", category: "Serum", key_ingredients: ["vitamin c"], price: 52, priceNote: AS_OF, url: "https://www.paulaschoice.com" },
+  { id: "neutrogena-ha", name: "Hydro Boost Water Gel", brand: "Neutrogena", category: "Moisturizer", key_ingredients: ["hyaluronic acid"], price: 20, priceNote: AS_OF, url: "https://www.neutrogena.com" },
+  { id: "cetaphil-cleanser", name: "Gentle Skin Cleanser", brand: "Cetaphil", category: "Cleanser", key_ingredients: ["glycerin"], price: 13, priceNote: AS_OF, url: "https://www.cetaphil.com" },
+  { id: "inkey-peptide", name: "Peptide Moisturizer", brand: "The INKEY List", category: "Moisturizer", key_ingredients: ["peptides"], price: 15, priceNote: AS_OF, url: "https://www.theinkeylist.com" },
 ];
 
 // Deterministic matcher: given agent criteria, rank real products.
@@ -86,9 +96,10 @@ export function matchProducts(
     wanted.get(ing)!.add(c.concern);
   }
 
+  const hasBudget = budget != null && budget > 0; // 0/undefined = no cap
   const scored = CATALOG.filter((p) => {
     // Sunscreen is essential and always shown, regardless of budget.
-    if (budget && p.price > budget && p.category !== "Sunscreen") return false;
+    if (hasBudget && p.price > budget! && p.category !== "Sunscreen") return false;
     if (p.key_ingredients.some((i) => excludeIngredients.includes(i.toLowerCase()))) return false;
     return true;
   }).map((p) => {
@@ -111,7 +122,7 @@ export function matchProducts(
 
   // Fallback: if the budget filtered everything out, retry without the cap
   // rather than showing an empty grid.
-  if (matched.length === 0 && budget) return matchProducts(criteria, undefined, excludeIngredients);
+  if (matched.length === 0 && hasBudget) return matchProducts(criteria, undefined, excludeIngredients);
 
   return matched;
 }
