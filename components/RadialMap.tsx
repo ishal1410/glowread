@@ -87,7 +87,9 @@ export default function RadialMap({ concerns, healthScore }: { concerns: Concern
         {/* Concern wedges (the skin map) */}
         <g className="bloom" style={{ transformOrigin: `${C}px ${C}px` }} filter="url(#soft)">
           {ranked.map((c, i) => {
-            const b = badness(c.key, c.ui_score);
+            // Size on raw_score, the same field the wedges are ordered by, so a
+            // lower-ranked wedge can never render longer than a higher one.
+            const b = badness(c.key, c.raw_score);
             const rOut = R_IN + (b / 100) * (R_MAX - R_IN);
             const a0 = i * step + PAD / 2;
             const a1 = (i + 1) * step - PAD / 2;

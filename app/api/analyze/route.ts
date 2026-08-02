@@ -29,6 +29,40 @@ function rateLimited(ip: string): boolean {
   return recent.length > RL_MAX;
 }
 
+// Client IP for rate limiting. The LEFTMOST X-Forwarded-For entry is
+// client-controlled (trivially spoofed to dodge the limit); the platform
+// appends the real client IP on the RIGHT, so take the last entry. Fall back
+// to x-real-ip, then a constant.
+function clientIp(req: NextRequest): string {
+  const xff = req.headers.get("x-forwarded-for");
+  if (xff) {
+    const parts = xff.split(",").map((s) => s.trim()).filter(Boolean);
+    if (parts.length) return parts[parts.length - 1];
+  }
+  return req.headers.get("x-real-ip")?.trim() || "local";
+}
+
+const SKIN_TYPES: ReadonlyArray<NonNullable<UserProfile["skinType"]>> = [
+  "dry", "oily", "combination", "normal", "sensitive",
+];
+
+// Validate/coerce the client-supplied profile. Never trust raw JSON: pregnant
+// feeds the safety gate (retinoid exclusion) and budget feeds product matching.
+function sanitizeProfile(raw: unknown): UserProfile | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as Record<string, unknown>;
+  const p: UserProfile = {};
+  if (typeof r.skinType === "string" && (SKIN_TYPES as readonly string[]).includes(r.skinType)) {
+    p.skinType = r.skinType as UserProfile["skinType"];
+  }
+  if (typeof r.budget === "number" && Number.isFinite(r.budget) && r.budget >= 0) {
+    p.budget = r.budget;
+  }
+  if (typeof r.pregnant === "boolean") p.pregnant = r.pregnant;
+  if (typeof r.sensitive === "boolean") p.sensitive = r.sensitive;
+  return p;
+}
+
 // Verify real image magic bytes rather than trusting the client-supplied MIME.
 // Returns the canonical MIME, or null if the bytes are not a supported image.
 function sniffImageMime(buf: Buffer): string | null {
@@ -40,7 +74,7 @@ function sniffImageMime(buf: Buffer): string | null {
 
 export async function POST(req: NextRequest) {
   try {
-    const ip = (req.headers.get("x-forwarded-for") ?? "local").split(",")[0].trim();
+    const ip = clientIp(req);
     if (rateLimited(ip)) {
       return NextResponse.json({ error: "Too many requests. Please wait a moment." }, { status: 429 });
     }
@@ -53,8 +87,12 @@ export async function POST(req: NextRequest) {
     const contentType = req.headers.get("content-type") || "";
     if (contentType.includes("multipart/form-data")) {
       // Reject oversized uploads by declared length BEFORE buffering the body.
-      const declaredLen = Number(req.headers.get("content-length") || 0);
-      if (declaredLen > MAX_BODY_BYTES) {
+      // Also require a valid Content-Length: a chunked request without one would
+      // otherwise slip past this and let formData() buffer unbounded (memory DoS).
+      // Browsers always set Content-Length for FormData bodies, so legit uploads
+      // are unaffected.
+      const declaredLen = Number(req.headers.get("content-length"));
+      if (!Number.isFinite(declaredLen) || declaredLen <= 0 || declaredLen > MAX_BODY_BYTES) {
         return NextResponse.json({ error: "Image too large (max 10MB)." }, { status: 413 });
       }
 
@@ -79,15 +117,15 @@ export async function POST(req: NextRequest) {
       const profileStr = form.get("profile");
       if (typeof profileStr === "string" && profileStr) {
         try {
-          profile = JSON.parse(profileStr);
+          profile = sanitizeProfile(JSON.parse(profileStr));
         } catch {
           return NextResponse.json({ error: "Invalid profile data." }, { status: 400 });
         }
       }
     } else {
       const body = await req.json().catch(() => ({}));
-      profile = body.profile;
-      variant = body.variant;
+      profile = sanitizeProfile(body.profile);
+      variant = typeof body.variant === "string" ? body.variant : undefined;
     }
 
     // 1) Skin analysis (mock unless PERFECTCORP_API_KEY set)

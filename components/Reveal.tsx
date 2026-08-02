@@ -20,7 +20,7 @@ function ConcernBar({ concern }: { concern: ConcernScore }) {
       </div>
       <div className="h-2 rounded-full overflow-hidden" style={{ background: "var(--surface-2)" }}>
         <div className="h-full rounded-full"
-          style={{ width: `${concern.ui_score}%`, background: SEV_COLOR[level], transition: "width 1s ease" }} />
+          style={{ width: `${b}%`, background: SEV_COLOR[level], transition: "width 1s ease" }} />
       </div>
     </div>
   );

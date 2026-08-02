@@ -58,7 +58,12 @@ export default function Home() {
           ? { body }
           : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
       });
-      if (!res.ok) throw new Error("failed");
+      if (!res.ok) {
+        // Surface the route's specific message (413 too large, 429 rate limit,
+        // 400 bad file/profile) instead of a generic fallback.
+        const errData = await res.json().catch(() => null);
+        throw new Error(errData?.error || "Something went wrong analyzing your skin. Please try again.");
+      }
       const data: AnalyzeResult = await res.json();
       // Keep the loader on screen at least ~2.2s so it feels considered.
       const wait = Math.max(0, 2200 - (Date.now() - started));
@@ -66,8 +71,8 @@ export default function Home() {
         setResult(data);
         setPhase("done");
       }, wait);
-    } catch {
-      setError("Something went wrong analyzing your skin. Please try again.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Something went wrong analyzing your skin. Please try again.");
       setPhase("error");
     }
   }
