@@ -55,8 +55,8 @@ export default function Home() {
       const res = await fetch("/api/analyze", {
         method: "POST",
         // Never let the loader spin forever if the route stalls. Must exceed the
-        // server budget (real skin analysis up to ~55s + narration).
-        signal: AbortSignal.timeout(70000),
+        // server budget (poll up to ~110s + init/put/task + narration).
+        signal: AbortSignal.timeout(150000),
         ...(body instanceof FormData
           ? { body }
           : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),

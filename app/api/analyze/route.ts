@@ -7,9 +7,11 @@ import { analyzeErrorResponse } from "@/lib/analyzeError";
 import type { UserProfile, AnalyzeResult } from "@/lib/types";
 
 export const runtime = "nodejs";
-// Real Perfect Corp flow polls a few seconds; raise the serverless limit above
-// the Vercel Hobby default of 10s. (Mock mode returns instantly.)
-export const maxDuration = 60;
+// Real Perfect Corp flow polls until the analysis completes (highly variable,
+// occasionally >55s under congestion), so allow a long function budget. Locally
+// this is uncapped; on Vercel this needs a plan that permits it (Hobby caps at
+// 60s → very slow analyses there need client-side polling, a follow-up).
+export const maxDuration = 150;
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
 const MAX_BODY_BYTES = MAX_IMAGE_BYTES + 512 * 1024; // image + room for the profile field

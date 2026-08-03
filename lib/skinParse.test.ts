@@ -8,6 +8,7 @@ import {
   parseSkinAnalysis,
   pollUntilDone,
   faceFillCrop,
+  expandFaceBox,
   HD_CONCERNS,
 } from "./skinParse";
 import { rankByBadness } from "./metrics";
@@ -276,6 +277,51 @@ describe("faceFillCrop", () => {
     const removedTop = b.top;
     const removedBottom = 1000 - (b.top + b.height);
     expect(removedTop).toBeLessThan(removedBottom);
+  });
+});
+
+describe("expandFaceBox", () => {
+  // face-api tinyFaceDetector returned this box for the passport (600x600).
+  const faceBox = { x: 177, y: 168, width: 244, height: 206 };
+
+  test("expands around the face, stays square and inside the image", () => {
+    const b = expandFaceBox(faceBox, 600, 600);
+    expect(b.width).toBe(b.height); // square
+    expect(b.width).toBeGreaterThan(faceBox.width); // padded beyond the tight face
+    expect(b.left).toBeGreaterThanOrEqual(0);
+    expect(b.top).toBeGreaterThanOrEqual(0);
+    expect(b.left + b.width).toBeLessThanOrEqual(600);
+    expect(b.top + b.height).toBeLessThanOrEqual(600);
+  });
+
+  test("crop side is ~1.4x the face (so upscaling makes the face large enough for the gate)", () => {
+    const b = expandFaceBox(faceBox, 600, 600);
+    const maxDim = Math.max(faceBox.width, faceBox.height);
+    // Not clamped here, so it should be right around 1.4x.
+    expect(b.width).toBeGreaterThanOrEqual(Math.round(maxDim * 1.3));
+    expect(b.width).toBeLessThanOrEqual(Math.round(maxDim * 1.5));
+  });
+
+  test("biases the crop upward to include the forehead (center above the face-box center)", () => {
+    const b = expandFaceBox(faceBox, 600, 600);
+    const cropCenterY = b.top + b.height / 2;
+    const faceCenterY = faceBox.y + faceBox.height / 2;
+    expect(cropCenterY).toBeLessThan(faceCenterY);
+  });
+
+  test("clamps to bounds when the face sits near an edge", () => {
+    const edge = { x: 10, y: 10, width: 200, height: 200 };
+    const b = expandFaceBox(edge, 400, 400);
+    expect(b.left).toBeGreaterThanOrEqual(0);
+    expect(b.top).toBeGreaterThanOrEqual(0);
+    expect(b.left + b.width).toBeLessThanOrEqual(400);
+  });
+
+  test("never exceeds the image (huge face in a small image)", () => {
+    const b = expandFaceBox({ x: 0, y: 0, width: 500, height: 500 }, 512, 512);
+    expect(b.width).toBeLessThanOrEqual(512);
+    expect(b.height).toBeLessThanOrEqual(512);
+    expect(b.left + b.width).toBeLessThanOrEqual(512);
   });
 });
 

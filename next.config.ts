@@ -33,6 +33,14 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // Face detection + image libs load native/wasm/model files from node_modules at
+  // runtime; keep them out of the bundler so those assets resolve correctly.
+  serverExternalPackages: [
+    "@vladmandic/face-api",
+    "@tensorflow/tfjs",
+    "@tensorflow/tfjs-backend-wasm",
+    "sharp",
+  ],
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },

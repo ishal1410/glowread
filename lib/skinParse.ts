@@ -207,6 +207,29 @@ export function faceFillCrop(w: number, h: number): CropBox {
   return { left, top, width, height };
 }
 
+// Given a detected face box, produce a square crop around it for skin analysis.
+// The crop is ~1.4x the face's larger dimension (K) so that upscaling the result
+// to FACE_FILL_SHORT leaves the face large enough to clear Perfect Corp's
+// face-size gate (final face px ≈ FACE_FILL_SHORT / K ≈ 1070). Centered on the
+// face but biased slightly up to include the forehead. Clamped to the image; a
+// face bigger than the frame just uses the whole frame.
+const FACE_CROP_K = 1.4;
+export function expandFaceBox(
+  box: { x: number; y: number; width: number; height: number },
+  imgW: number,
+  imgH: number
+): CropBox {
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2 - box.height * 0.1; // bias up for forehead
+  let side = Math.round(Math.max(box.width, box.height) * FACE_CROP_K);
+  side = Math.min(side, imgW, imgH);
+  let left = Math.round(cx - side / 2);
+  let top = Math.round(cy - side / 2);
+  left = Math.max(0, Math.min(left, imgW - side));
+  top = Math.max(0, Math.min(top, imgH - side));
+  return { left, top, width: side, height: side };
+}
+
 export type PollState =
   | { state: "running" }
   | { state: "success"; results: unknown }

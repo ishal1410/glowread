@@ -4,7 +4,14 @@
 import sharp from "sharp";
 import type { SkinScores } from "./types";
 import { getMockScores, MOCK_VARIANTS } from "./mockSkin";
-import { parseInitResponse, buildTaskBody, parseTaskId, readPollState, pollUntilDone, parseSkinAnalysis, faceFillCrop, HD_CONCERNS } from "./skinParse";
+import { parseInitResponse, buildTaskBody, parseTaskId, readPollState, pollUntilDone, parseSkinAnalysis, faceFillCrop, expandFaceBox, HD_CONCERNS } from "./skinParse";
+import { detectFace } from "./faceDetect";
+
+// Thrown when local face detection runs and finds no face — the caller maps this
+// to a fast, friendly 400 instead of wasting ~70s + a paid unit on the upstream.
+export class NoFaceError extends Error {
+  constructor() { super("no_face_detected"); this.name = "NoFaceError"; }
+}
 
 // S2S API host (docs.perfectcorp.com/develop/api_server). NOT yce.perfectcorp.com
 // (that's the web console — real calls 404). Overridable via env.
@@ -43,11 +50,23 @@ async function normalizeImage(imageBuffer: Buffer): Promise<{ buffer: Buffer; mi
   const w = meta.width ?? 0;
   const h = meta.height ?? 0;
 
+  // Detect the face locally. null => no face (reject fast, before the paid call).
+  // A thrown detector error (model/backend unavailable) is non-fatal: fall back
+  // to the heuristic center crop rather than rejecting a possibly-valid photo.
+  let face: Awaited<ReturnType<typeof detectFace>> | undefined;
+  try {
+    face = await detectFace(oriented);
+  } catch (e) {
+    console.error("face detect unavailable, using heuristic crop", e);
+    face = undefined;
+  }
+  if (face === null) throw new NoFaceError();
+
   let pipeline = sharp(oriented);
   let cw = w;
   let ch = h;
   if (w > 0 && h > 0) {
-    const box = faceFillCrop(w, h);
+    const box = face ? expandFaceBox(face, w, h) : faceFillCrop(w, h);
     pipeline = pipeline.extract(box);
     cw = box.width;
     ch = box.height;
@@ -119,7 +138,10 @@ async function analyzeSkinReal(imageBuffer: Buffer, _mime: string): Promise<Skin
     },
     now: () => Date.now(),
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
-    budgetMs: 55000,
+    // Real HD analysis is highly variable (seen 20s, seen >55s under congestion).
+    // A too-short budget killed valid slow analyses. Generous window; the durable
+    // fix for very slow runs on serverless is client-side polling (follow-up).
+    budgetMs: 110000,
     intervalMs: 1500,
   });
 
