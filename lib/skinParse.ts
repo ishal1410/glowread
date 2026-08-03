@@ -191,8 +191,13 @@ export interface CropBox { left: number; top: number; width: number; height: num
 // Limitation: an off-center or tilted face may be cropped wrong (accepted
 // trade-off for zero added dependencies). It only ever ENLARGES the face vs. the
 // old no-crop path, so it cannot make the gate harder to pass.
-const CROP_W = 0.82; // keep 82% of width
-const CROP_H = 0.88; // keep 88% of height
+// Tuned against the live face-size gate: an 0.82/0.88 crop left the face ~819px
+// in the upscaled output and the API still rejected it (error_src_face_too_small);
+// a tighter ~0.6/0.72 crop (matching the manual crop that passed, face ~1100px+)
+// clears it. Aggressive on purpose — a margin-heavy shot (e.g. passport) must
+// pass; a very tight selfie may lose a little edge (acceptable, user can retake).
+const CROP_W = 0.6; // keep 60% of width
+const CROP_H = 0.72; // keep 72% of height
 const TOP_BIAS = 0.35; // remove 35% of the excess from the top, 65% from the bottom
 export function faceFillCrop(w: number, h: number): CropBox {
   const width = Math.max(1, Math.min(w, Math.round(w * CROP_W)));

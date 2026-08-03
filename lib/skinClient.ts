@@ -34,7 +34,7 @@ export async function analyzeSkin(
 // toward the face via a centered heuristic crop, then (2) upscale so the short
 // side is >= FACE_FILL_SHORT (long capped at 4096). Returns JPEG. EXIF rotation
 // is applied first so the crop geometry matches what the model sees.
-const FACE_FILL_SHORT = 1440;
+const FACE_FILL_SHORT = 1500;
 const MAX_LONG = 4096;
 async function normalizeImage(imageBuffer: Buffer): Promise<{ buffer: Buffer; mime: string }> {
   // Bake in EXIF orientation first so crop coordinates are on the upright image.
