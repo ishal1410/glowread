@@ -4,7 +4,7 @@
 import sharp from "sharp";
 import type { SkinScores } from "./types";
 import { getMockScores, MOCK_VARIANTS } from "./mockSkin";
-import { parseInitResponse, buildTaskBody, parseTaskId, readPollState, pollUntilDone, mapConcernsToScores, HD_CONCERNS } from "./skinParse";
+import { parseInitResponse, buildTaskBody, parseTaskId, readPollState, pollUntilDone, parseSkinAnalysis, HD_CONCERNS } from "./skinParse";
 
 // S2S API host (docs.perfectcorp.com/develop/api_server). NOT yce.perfectcorp.com
 // (that's the web console — real calls 404). Overridable via env.
@@ -82,7 +82,7 @@ async function analyzeSkinReal(imageBuffer: Buffer, _mime: string): Promise<Skin
     body: JSON.stringify(buildTaskBody(fileId, HD_CONCERNS)),
     signal: AbortSignal.timeout(10000),
   });
-  if (!taskRes.ok) throw new Error(`task create failed: ${taskRes.status}`);
+  if (!taskRes.ok) throw new Error(`task create failed: ${taskRes.status} ${await taskRes.text().catch(() => "")}`);
   const taskId = parseTaskId(await taskRes.json());
 
   // 4) poll for result. Real HD/SD analysis observed taking >25s, so the window
@@ -104,46 +104,7 @@ async function analyzeSkinReal(imageBuffer: Buffer, _mime: string): Promise<Skin
     intervalMs: 1500,
   });
 
-  // TEMP (remove after capture): dump the real success shape so parseRealResult's
-  // extractor can be pinned + TDD'd against a real fixture in skinParse.test.ts.
-  console.log("PC_RESULTS_SHAPE>>>", JSON.stringify(results));
-  return parseRealResult(results);
-}
-
-// Extract the concern-score map from the poll `results` container, then map to
-// SkinScores via the tested mapConcernsToScores. The EXACT container shape (flat
-// map vs. wrapped vs. a download URL) is the one thing not yet pinned to a live
-// SUCCESS payload — the console.log above captures it on the first real call, and
-// this extractor is finalized + TDD'd then. The heuristic below covers the
-// plausible shapes so the app degrades gracefully rather than crashing.
-function parseRealResult(results: unknown): SkinScores {
-  const { concernMap, skinAge } = extractConcernContainer(results);
-  return mapConcernsToScores(concernMap, skinAge);
-}
-
-type RawConcern = { raw_score?: number; ui_score?: number; score?: number } | null;
-
-// Heuristic container extraction (PENDING live pin — see parseRealResult note).
-function extractConcernContainer(results: unknown): {
-  concernMap: Record<string, RawConcern>;
-  skinAge: number;
-} {
-  const r = (results ?? {}) as Record<string, unknown>;
-  // A value that looks like a concern entry ({raw_score|ui_score|score}).
-  const looksLikeScore = (v: unknown): boolean =>
-    !!v && typeof v === "object" && ["raw_score", "ui_score", "score"].some((k) => k in (v as object));
-
-  // Prefer results itself if it's already a flat concern map; else common wrappers.
-  let concernMap: Record<string, RawConcern> = {};
-  const candidates: unknown[] = [r, r.scores, r.skin_analysis, r.result, r.results];
-  for (const c of candidates) {
-    if (c && typeof c === "object" && Object.values(c as object).some(looksLikeScore)) {
-      concernMap = c as Record<string, RawConcern>;
-      break;
-    }
-  }
-
-  const skinAgeRaw = r.skin_age ?? r.age ?? (r.result as Record<string, unknown>)?.skin_age;
-  const skinAge = typeof skinAgeRaw === "number" ? Math.round(skinAgeRaw) : 0;
-  return { concernMap, skinAge };
+  // Map the live success payload -> app SkinScores. Shape + polarity are pinned to
+  // a real capture and TDD'd in skinParse.test.ts (parseSkinAnalysis).
+  return parseSkinAnalysis(results);
 }

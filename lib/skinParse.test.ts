@@ -5,9 +5,42 @@ import {
   parseTaskId,
   readPollState,
   mapConcernsToScores,
+  parseSkinAnalysis,
   pollUntilDone,
   HD_CONCERNS,
 } from "./skinParse";
+import { rankByBadness } from "./metrics";
+
+// REAL success payload shape captured live from yce-api-01.makeupar.com on
+// 2026-08-03 (scripts/test-perfectcorp-full.mjs, CAPTURE_OUT). mask_urls trimmed
+// for brevity but every type/score/region field is verbatim from the live call.
+// KEY FACT pinned here: Perfect Corp raw_score/ui_score are HIGHER = BETTER for
+// every concern (this clear face scored redness/texture/pore = ~100), the OPPOSITE
+// of the app's convention — so parseSkinAnalysis must invert non-attribute keys.
+const REAL_SUCCESS = {
+  output: [
+    { type: "hd_radiance", raw_score: 90, ui_score: 85, url: null },
+    { type: "hd_firmness", raw_score: 66, ui_score: 74, url: null },
+    { type: "hd_dark_circle", raw_score: 48, ui_score: 64, url: null },
+    { type: "hd_redness", raw_score: 100, ui_score: 99, url: null },
+    { type: "hd_oiliness", raw_score: 93, ui_score: 90, url: null },
+    { type: "hd_age_spot", raw_score: 96, ui_score: 91, url: null },
+    { type: "hd_moisture", raw_score: 70, ui_score: 77, url: null },
+    { type: "hd_acne", raw_score: 75, ui_score: 85, region: "whole", url: null },
+    { type: "hd_texture", raw_score: 100, ui_score: 99, region: "whole", url: null },
+    { type: "hd_pore", raw_score: 100, ui_score: 99, region: "forehead", url: null },
+    { type: "hd_pore", raw_score: 100, ui_score: 99, region: "nose", url: null },
+    { type: "hd_pore", raw_score: 100, ui_score: 99, region: "cheek", url: null },
+    { type: "hd_pore", raw_score: 100, ui_score: 99, region: "whole", url: null },
+    { type: "hd_wrinkle", raw_score: 76, ui_score: 75, region: "forehead", url: null },
+    { type: "hd_wrinkle", raw_score: 90, ui_score: 80, region: "glabellar", url: null },
+    { type: "hd_wrinkle", raw_score: 99, ui_score: 96, region: "crowfeet", url: null },
+    { type: "hd_wrinkle", raw_score: 94, ui_score: 87, region: "whole", url: null },
+    { type: "all", score: 86, url: null },
+    { type: "skin_age", score: 32, url: null },
+    { type: "resize_image", mask_urls: ["https://x/resize.jpg"], url: null },
+  ],
+};
 
 // A controllable fake clock so poll timing is deterministic (no real waiting).
 function fakeClock() {
@@ -161,6 +194,54 @@ describe("mapConcernsToScores", () => {
   test("skinAge is passed through when the API provides it", () => {
     const s = mapConcernsToScores({ hd_wrinkle: { raw_score: 40 } }, 34);
     expect(s.skinAge).toBe(34);
+  });
+});
+
+describe("parseSkinAnalysis (real live shape)", () => {
+  const s = parseSkinAnalysis(REAL_SUCCESS);
+  const byKey = Object.fromEntries(s.concerns.map((c) => [c.key, c]));
+
+  test("produces exactly the 11 app concern keys (specials dropped, regions collapsed)", () => {
+    expect(s.concerns.map((c) => c.key).sort()).toEqual(
+      ["acne", "dark_circle", "firmness", "hydration", "oiliness", "pore", "radiance", "redness", "spot", "texture", "wrinkle"]
+    );
+  });
+
+  test("INVERTS higher-is-worse concerns (PC higher=better) into app convention", () => {
+    // redness PC raw 100 (=perfect/clear) -> app raw 0 (no concern); ui 99 -> 1.
+    expect(byKey.redness.raw_score).toBe(0);
+    expect(byKey.redness.ui_score).toBe(1);
+    // texture/pore PC 100 -> app 0 (clear).
+    expect(byKey.texture.raw_score).toBe(0);
+    expect(byKey.pore.raw_score).toBe(0);
+    // dark_circle PC raw 48 -> app 52 (his worst concern, matches the photo).
+    expect(byKey.dark_circle.raw_score).toBe(52);
+    expect(byKey.dark_circle.ui_score).toBe(36); // 100-64
+  });
+
+  test("does NOT invert attribute concerns (firmness/hydration/radiance already higher=better)", () => {
+    expect(byKey.firmness.raw_score).toBe(66);
+    expect(byKey.radiance.raw_score).toBe(90);
+    expect(byKey.hydration.raw_score).toBe(70); // from hd_moisture
+  });
+
+  test("collapses multi-region concerns using the 'whole' region", () => {
+    // wrinkle whole PC raw 94 -> app raw 6 (ignores the higher per-region values).
+    expect(byKey.wrinkle.raw_score).toBe(6);
+    expect(byKey.wrinkle.ui_score).toBe(13); // 100-87
+  });
+
+  test("uses the API's 'all' overall as healthScore and 'skin_age' as skinAge", () => {
+    expect(s.healthScore).toBe(86);
+    expect(s.skinAge).toBe(32);
+    expect(s.source).toBe("perfectcorp");
+  });
+
+  test("dark_circle is ranked the top concern (highest badness) for this face", () => {
+    // sanity: the parser's output, ranked by the app's badness, surfaces the
+    // concern that visibly matches the photo — proves polarity is correct.
+    const top = rankByBadness(s.concerns, "raw_score")[0];
+    expect(top.key).toBe("dark_circle");
   });
 });
 

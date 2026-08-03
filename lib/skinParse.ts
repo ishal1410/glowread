@@ -5,7 +5,7 @@
 
 import type { SkinScores, ConcernScore } from "./types";
 import { CONCERN_LABELS } from "./mockSkin";
-import { badness } from "./metrics";
+import { badness, HIGHER_IS_BETTER } from "./metrics";
 
 // HD concern actions accepted by dst_actions. SD and HD MUST NOT be mixed, so we
 // commit to HD (the premium set). Chosen to cover the app's UI concerns.
@@ -99,6 +99,82 @@ export function mapConcernsToScores(
     const meanBadness =
       concerns.reduce((sum, c) => sum + badness(c.key, c.raw_score), 0) / concerns.length;
     healthScore = Math.min(100, Math.max(0, Math.round(100 - meanBadness)));
+  }
+
+  return { concerns, skinAge, healthScore, source: "perfectcorp" };
+}
+
+// --- Real Perfect Corp success payload parsing (pinned to a live capture) ------
+// The live success shape is data.results = { output: [ entry, ... ] } where each
+// concern entry is { type: "hd_<concern>", raw_score, ui_score, region? } and
+// special entries carry a single `score`: { type:"all", score } (overall) and
+// { type:"skin_age", score } (age). `resize_image` and other non-scored entries
+// are ignored. hd_pore / hd_wrinkle repeat per face region (forehead/nose/... +
+// "whole"); we collapse to the "whole" aggregate.
+//
+// CRITICAL polarity fact (captured 2026-08-03): Perfect Corp scores are HIGHER =
+// BETTER for every concern (a clear face scores ~100 on redness/pore/texture),
+// which is the OPPOSITE of the app's convention (higher = worse, except the
+// HIGHER_IS_BETTER attributes). So we invert every non-attribute key to app
+// convention here; attributes (firmness/hydration/radiance) already agree.
+
+interface OutputEntry {
+  type?: string;
+  raw_score?: number;
+  ui_score?: number;
+  score?: number;
+  region?: string;
+}
+
+// Convert one Perfect Corp score (higher = better) to the app's convention for
+// the given app key: attributes stay as-is (higher = better), everything else is
+// inverted so higher = worse. Clamped + rounded.
+function toAppScore(appKey: string, pcScore: number): number {
+  const v = HIGHER_IS_BETTER.has(appKey) ? pcScore : 100 - pcScore;
+  return Math.min(100, Math.max(0, Math.round(v)));
+}
+
+export function parseSkinAnalysis(results: unknown): SkinScores {
+  const output = (results as { output?: unknown })?.output;
+  if (!Array.isArray(output)) return mapConcernsToScores({});
+
+  const entries = output as OutputEntry[];
+
+  // Collapse concern entries (finite raw_score) by normalized key, preferring the
+  // "whole" region; if none is "whole", keep the WORST region (min PC score = most
+  // concerning, since PC is higher = better).
+  const rep = new Map<string, OutputEntry>();
+  for (const e of entries) {
+    if (typeof e.type !== "string" || typeof e.raw_score !== "number" || !Number.isFinite(e.raw_score)) continue;
+    const key = normalizeConcernKey(e.type);
+    const cur = rep.get(key);
+    if (!cur) { rep.set(key, e); continue; }
+    if (e.region === "whole") { rep.set(key, e); continue; }
+    if (cur.region !== "whole" && (e.raw_score ?? 100) < (cur.raw_score ?? 100)) rep.set(key, e);
+  }
+
+  const concerns: ConcernScore[] = [...rep.entries()].map(([key, e]) => ({
+    key,
+    label: CONCERN_LABELS[key] ?? prettify(key),
+    raw_score: toAppScore(key, e.raw_score as number),
+    ui_score: toAppScore(key, e.ui_score ?? (e.raw_score as number)),
+  }));
+
+  // Overall + age come from the special single-`score` entries.
+  const overall = entries.find((e) => e.type === "all" && typeof e.score === "number")?.score;
+  const ageEntry = entries.find((e) => e.type === "skin_age" && typeof e.score === "number")?.score;
+  const skinAge = typeof ageEntry === "number" ? Math.round(ageEntry) : 0;
+
+  // Prefer the API's own overall (higher = better, same as healthScore); else
+  // derive from mean badness so the field is never left at 0 on a valid analysis.
+  let healthScore: number;
+  if (typeof overall === "number") {
+    healthScore = Math.min(100, Math.max(0, Math.round(overall)));
+  } else if (concerns.length) {
+    const meanBadness = concerns.reduce((sum, c) => sum + badness(c.key, c.raw_score), 0) / concerns.length;
+    healthScore = Math.min(100, Math.max(0, Math.round(100 - meanBadness)));
+  } else {
+    healthScore = 0;
   }
 
   return { concerns, skinAge, healthScore, source: "perfectcorp" };

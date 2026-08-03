@@ -3,6 +3,7 @@ import { analyzeSkin } from "@/lib/skinClient";
 import { getPlan } from "@/lib/agent";
 import { applySafety } from "@/lib/safety";
 import { matchProducts } from "@/lib/products";
+import { analyzeErrorResponse } from "@/lib/analyzeError";
 import type { UserProfile, AnalyzeResult } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -145,6 +146,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(result);
   } catch (err) {
     console.error("analyze error", err);
-    return NextResponse.json({ error: "Analysis failed. Please try again." }, { status: 500 });
+    const { status, message } = analyzeErrorResponse(err);
+    return NextResponse.json({ error: message }, { status });
   }
 }

@@ -72,7 +72,9 @@ for (let i = 0; i < 45 && taskId; i++) {
   const st = p?.data?.task_status ?? p?.data?.status;
   console.log(`STEP4 poll#${i} t=${((Date.now() - t0) / 1000).toFixed(0)}s http=${poll.status} task_status=${st}`);
   if (st === "success" || st === "done") {
-    console.log(`\n==== SUCCESS after ${((Date.now() - t0) / 1000).toFixed(0)}s ====\n`, JSON.stringify(p, null, 2).slice(0, 6000));
+    const out = process.env.CAPTURE_OUT;
+    if (out) { const { writeFileSync } = await import("node:fs"); writeFileSync(out, JSON.stringify(p, null, 2)); console.log(`\n==== SUCCESS after ${((Date.now() - t0) / 1000).toFixed(0)}s -> wrote ${out} ====`); }
+    else console.log(`\n==== SUCCESS after ${((Date.now() - t0) / 1000).toFixed(0)}s ====\n`, JSON.stringify(p, null, 2).slice(0, 6000));
     break;
   }
   if (st === "error" || st === "failed") {
