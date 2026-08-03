@@ -4,9 +4,15 @@ import type { NextConfig } from "next";
 // 'unsafe-inline' is required for Next's inline hydration bootstrap and the
 // inline style props used throughout the UI (removing it needs nonce plumbing).
 // Perfect Corp and Gemini are called server-side, so they need no connect-src.
+//
+// 'unsafe-eval' is added in DEVELOPMENT ONLY: Next's dev runtime (Turbopack /
+// React Refresh / the error overlay) evaluates code via eval(), so without it
+// the browser logs a CSP violation on every page and Next shows a "1 Issue"
+// badge. Production React never uses eval(), so the prod CSP stays strict.
+const isDev = process.env.NODE_ENV !== "production";
 const csp = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline'",
+  isDev ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'" : "script-src 'self' 'unsafe-inline'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' blob: data:",
   "font-src 'self'",

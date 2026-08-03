@@ -49,7 +49,7 @@ export interface AgentPlan {
   routine: { AM: RoutineStep[]; PM: RoutineStep[] };
   product_criteria: ProductCriterion[];
   cautions: string[];
-  source: "mock" | "gemini";
+  source: "mock" | "gemini" | "claude" | "agentrouter";
 }
 
 export interface Product {

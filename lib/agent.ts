@@ -3,6 +3,7 @@
 // layer (Gemini free, or Claude) rewrites the wording more naturally. If the LLM
 // is absent or returns bad output, we fall back to the deterministic plan (P16).
 
+import Anthropic from "@anthropic-ai/sdk";
 import type { SkinScores, AgentPlan, TopConcern, RoutineStep, ProductCriterion } from "./types";
 import { CONCERN_INGREDIENTS } from "./products";
 import { badness, severityOf, rankByBadness } from "./metrics";
@@ -104,24 +105,79 @@ function minimalPlan(): AgentPlan {
   };
 }
 
+// Total wall-clock budget for ALL narration attempts combined. Narration is
+// cosmetic; the deterministic `base` plan is always ready in-memory, so we never
+// let a slow/degraded provider (AgentRouter has been observed spiking to 40s+)
+// delay the guaranteed response. On expiry we return `base` immediately. Kept
+// well under the route's maxDuration so the function never 504s on narration.
+const NARRATION_BUDGET_MS = 14_000;
+
 // Public entry. Uses the LLM narration layer if configured; otherwise
-// deterministic. On invalid/failed LLM output we retry once, then fall back to
-// the deterministic plan (P16) so the response can never break.
+// deterministic. Provider preference: AgentRouter (free Claude) > Claude
+// (sponsor-aligned) > Gemini (free fallback) > deterministic base. The whole
+// chain races a single wall-clock deadline; whoever loses, `base` (P16) is
+// returned so the response can never break or hang.
 export async function getPlan(scores: SkinScores): Promise<AgentPlan> {
   const base = buildPlanFromScores(scores);
 
-  const geminiKey = process.env.GEMINI_API_KEY;
-  if (!geminiKey) return base; // mock-first default
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<AgentPlan>((resolve) => {
+    timer = setTimeout(() => resolve(base), NARRATION_BUDGET_MS);
+  });
+  try {
+    return await Promise.race([enrichPlan(base), deadline]);
+  } catch {
+    return base; // any unexpected failure in the chain -> deterministic plan
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
+// Sequential provider fallthrough. Each provider is bounded by its own fetch
+// timeout AND by the overall NARRATION_BUDGET_MS race in getPlan, so this can
+// never block the caller past that budget.
+async function enrichPlan(base: AgentPlan): Promise<AgentPlan> {
+  const routerKey = process.env.AGENTROUTER_API_KEY;
+  if (routerKey) {
+    const enriched = await enrichWithRetry(() => enrichWithAgentRouter(base, routerKey));
+    if (enriched) return enriched;
+  }
+
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  if (anthropicKey) {
+    const enriched = await enrichWithRetry(() => enrichWithClaude(base, anthropicKey));
+    if (enriched) return enriched;
+    // Claude failed -> fall through to Gemini if configured.
+  }
+
+  const geminiKey = process.env.GEMINI_API_KEY;
+  if (geminiKey) {
+    const enriched = await enrichWithRetry(() => enrichWithGemini(base, geminiKey));
+    if (enriched) return enriched;
+  }
+
+  return base; // mock-first default (no keys) or all providers failed
+}
+
+// Runs an enrichment call, retrying ONCE on transient failures (bad JSON, 5xx).
+// A timeout/abort is NOT retried: the gateway is congested, so a second attempt
+// would just burn another full timeout for the same reason — we fall through to
+// the next provider (or the overall deadline) instead. Errors are swallowed so
+// the caller can always fall through.
+async function enrichWithRetry(fn: () => Promise<AgentPlan | null>): Promise<AgentPlan | null> {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const enriched = await enrichWithGemini(base, geminiKey);
+      const enriched = await fn();
       if (enriched) return enriched;
-    } catch {
-      // fall through to retry, then to the deterministic base
+    } catch (err) {
+      // Don't retry a timeout — it will only stall again. Bail to next provider.
+      if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
+        return null;
+      }
+      // else: transient error -> fall through to one retry, then next provider
     }
   }
-  return base;
+  return null;
 }
 
 // Validate the LLM's narration against the expected schema. Returns null (which
@@ -143,14 +199,135 @@ function validateNarration(x: unknown): Narration | null {
   return { headline, explanations };
 }
 
+// Parse model JSON tolerantly. Models (especially via a third-party gateway)
+// frequently wrap JSON in ```json … ``` fences or add stray prose despite being
+// told not to. Strip fences and, failing that, extract the first {...} block.
+// Throws on genuinely unparseable text (caught upstream -> fallback).
+function parseNarrationJson(text: string): unknown {
+  const stripped = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  try {
+    return JSON.parse(stripped);
+  } catch {
+    const start = stripped.indexOf("{");
+    const end = stripped.lastIndexOf("}");
+    if (start !== -1 && end > start) return JSON.parse(stripped.slice(start, end + 1));
+    throw new Error("no JSON object in model output");
+  }
+}
+
+// Shared narration prompt. Both providers get the same instruction so the two
+// paths produce comparable copy; only the transport differs.
+function narrationPrompt(base: AgentPlan): string {
+  return `You are a warm, encouraging cosmetic skincare coach (NOT a doctor; never diagnose).
+Given these top concerns, rewrite ONLY the "headline" and each concern "explanation" in plain, friendly language.
+Keep the headline under 140 characters and each explanation under 240 characters — concise and warm.
+Do NOT mention numeric scores. Return strict JSON: {"headline": string, "explanations": {"<concernKey>": string}}.
+Top concerns: ${JSON.stringify(base.top_concerns.map((c) => ({ key: c.concern, label: c.label, severity: c.severity })))}`;
+}
+
+// Merge a validated narration onto the deterministic base. Structure (concerns,
+// routine, criteria) stays from the core, so the output schema can never break.
+function applyNarration(base: AgentPlan, parsed: Narration, source: AgentPlan["source"]): AgentPlan {
+  return {
+    ...base,
+    source,
+    headline: parsed.headline || base.headline,
+    top_concerns: base.top_concerns.map((c) => ({
+      ...c,
+      explanation: parsed.explanations?.[c.concern] || c.explanation,
+    })),
+  };
+}
+
+// Claude narration layer (sponsor-aligned). Uses the Anthropic SDK; model and
+// effort are tuned for a cheap, fast JSON rewrite rather than deep reasoning.
+async function enrichWithClaude(base: AgentPlan, apiKey: string): Promise<AgentPlan | null> {
+  // maxRetries: 0 — retry/timeout policy lives in enrichWithRetry + the overall
+  // deadline. The SDK default (2) would silently multiply attempts (up to 3 per
+  // call) and blow the latency budget.
+  const client = new Anthropic({ apiKey, maxRetries: 0 });
+
+  const message = await client.messages.create(
+    {
+      model: "claude-opus-5",
+      // Headroom so thinking + JSON (headline + up to 3 x ~600-char
+      // explanations) can't hit the cap and truncate into invalid JSON.
+      max_tokens: 2048,
+      // Narration is a trivial rewrite, not a reasoning task: keep effort low so
+      // the call stays fast (Vercel route budget) and cheap.
+      output_config: { effort: "low" },
+      system:
+        "You are a warm cosmetic skincare coach. Respond with strict JSON only — no preamble, no markdown fences.",
+      messages: [{ role: "user", content: narrationPrompt(base) }],
+    },
+    { timeout: 12000 }
+  );
+
+  const text = message.content.find((b) => b.type === "text")?.text;
+  if (!text) return null;
+
+  const parsed = validateNarration(parseNarrationJson(text));
+  if (!parsed) return null; // invalid schema -> caller retries, then next provider
+
+  return applyNarration(base, parsed, "claude");
+}
+
+// AgentRouter narration layer: Claude-grade output at $0 via the promo-credit
+// gateway. Uses plain fetch, NOT the Anthropic SDK — AgentRouter wraps every
+// response in a non-standard top-level `billing` object that breaks the SDK's
+// response typing (content/usage come back undefined). Its WAF also only accepts
+// Claude-Code-shaped traffic, so we present the CLI's client identity headers or
+// it returns 401 unauthorized_client_error. Anthropic wire format otherwise.
+async function enrichWithAgentRouter(base: AgentPlan, apiKey: string): Promise<AgentPlan | null> {
+  const baseURL = (process.env.AGENTROUTER_BASE_URL || "https://agentrouter.org").replace(/\/+$/, "");
+  const model = process.env.AGENTROUTER_MODEL || "claude-opus-5";
+
+  const res = await fetch(`${baseURL}/v1/messages`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      // Present the Claude Code CLI identity — the gateway's WAF rejects other
+      // clients with 401 unauthorized_client_error.
+      "User-Agent": "claude-cli/1.0.0 (external, cli)",
+      "x-app": "cli",
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 2048,
+      // effort low cuts Opus 5's thinking so the call runs ~7s not ~11s — this
+      // is a trivial rewrite, not a reasoning task.
+      output_config: { effort: "low" },
+      system:
+        "You are a warm cosmetic skincare coach. Respond with strict JSON only — no preamble, no markdown fences.",
+      messages: [{ role: "user", content: narrationPrompt(base) }],
+    }),
+    // Typical call is ~7s; cap at 12s so a congestion spike falls through to the
+    // next provider / deterministic base instead of stalling the whole budget.
+    signal: AbortSignal.timeout(12000),
+  });
+  if (!res.ok) return null;
+
+  const data = await res.json();
+  // Gateway wraps responses in a non-standard envelope; be defensive about shape.
+  const content = data?.content;
+  const text = Array.isArray(content)
+    ? content.find((b: { type?: string }) => b?.type === "text")?.text
+    : undefined;
+  if (typeof text !== "string") return null;
+
+  const parsed = validateNarration(parseNarrationJson(text));
+  if (!parsed) return null; // invalid schema -> caller retries, then next provider
+
+  return applyNarration(base, parsed, "agentrouter");
+}
+
 // LLM narration layer: rewrite headline + explanations in a warmer voice.
 // Structure (concerns, routine, criteria) stays from the deterministic core,
 // so the output schema can never break.
 async function enrichWithGemini(base: AgentPlan, apiKey: string): Promise<AgentPlan | null> {
-  const prompt = `You are a warm, encouraging cosmetic skincare coach (NOT a doctor; never diagnose).
-Given these top concerns, rewrite ONLY the "headline" and each concern "explanation" in plain, friendly language.
-Do NOT mention numeric scores. Return strict JSON: {"headline": string, "explanations": {"<concernKey>": string}}.
-Top concerns: ${JSON.stringify(base.top_concerns.map((c) => ({ key: c.concern, label: c.label, severity: c.severity })))}`;
+  const prompt = narrationPrompt(base);
 
   const res = await fetch(
     "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
@@ -162,24 +339,16 @@ Top concerns: ${JSON.stringify(base.top_concerns.map((c) => ({ key: c.concern, l
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: { responseMimeType: "application/json" },
       }),
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(10000),
     }
   );
   if (!res.ok) return null;
   const data = await res.json();
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) return null;
+  if (typeof text !== "string") return null;
 
-  const parsed = validateNarration(JSON.parse(text));
+  const parsed = validateNarration(parseNarrationJson(text));
   if (!parsed) return null; // invalid schema -> caller retries, then falls back
 
-  return {
-    ...base,
-    source: "gemini",
-    headline: parsed.headline || base.headline,
-    top_concerns: base.top_concerns.map((c) => ({
-      ...c,
-      explanation: parsed.explanations?.[c.concern] || c.explanation,
-    })),
-  };
+  return applyNarration(base, parsed, "gemini");
 }

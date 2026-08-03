@@ -35,9 +35,23 @@ units while plumbing deploy, harder to debug when the live result shape surprise
   before touching any Next-specific API. Most work here is in `lib/` (framework-free).
 - Mock path stays fully intact and default when no key is set (protects units).
 
-## Auth handshake (the core new piece) — `lib/pcAuth.ts`
+## Auth — UPDATED 2026-08-03: raw key already works
 
-Docs-confirmed flow:
+**Empirical finding (supersedes the A1 docs guess):** `scripts/test-perfectcorp-full.mjs`
+authenticated with `Authorization: Bearer <PERFECTCORP_API_KEY>` (raw key, NO
+handshake) and successfully captured real init/task/poll responses on 2026-08-02
+from `yce-api-01.makeupar.com`. So the RSA handshake below is **NOT needed** for this
+host/account. `pcAuth.ts` is **deferred** — build it only if today's live call returns
+401 (e.g. if the 67-char value was actually a ~2h access_token that has since expired).
+
+Host is likewise confirmed: `yce-api-01.makeupar.com` (do NOT switch to the docs'
+`.perfectcorp.com`). Concern coverage is also confirmed fine: all 11 HD keys map to
+existing `CONCERN_LABELS` + agent `EXPLANATIONS` after the `hd_` / `age_spot→spot` /
+`moisture→hydration` normalization. A6 is a non-issue.
+
+### Deferred handshake (only if 401) — `lib/pcAuth.ts`
+
+Docs-described flow:
 
 1. `payload = "client_id=<KEY>&timestamp=<now_ms>"`
 2. `id_token = base64( RSA_encrypt(payload, publicKeyFrom(SECRET)) )`
