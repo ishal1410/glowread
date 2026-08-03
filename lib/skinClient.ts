@@ -4,7 +4,7 @@
 import sharp from "sharp";
 import type { SkinScores } from "./types";
 import { getMockScores, MOCK_VARIANTS } from "./mockSkin";
-import { parseInitResponse, buildTaskBody, parseTaskId, readPollState, pollUntilDone, parseSkinAnalysis, HD_CONCERNS } from "./skinParse";
+import { parseInitResponse, buildTaskBody, parseTaskId, readPollState, pollUntilDone, parseSkinAnalysis, faceFillCrop, HD_CONCERNS } from "./skinParse";
 
 // S2S API host (docs.perfectcorp.com/develop/api_server). NOT yce.perfectcorp.com
 // (that's the web console — real calls 404). Overridable via env.
@@ -29,21 +29,40 @@ export async function analyzeSkin(
   return analyzeSkinReal(imageBuffer, opts?.mime ?? "image/jpeg");
 }
 
-// Ensure the image satisfies HD skin analysis: short side >= 1080, long <= 4096.
-// The API rejects smaller images ("error_below_min_image_size"). Returns JPEG.
+// Prepare the image for HD skin analysis. Perfect Corp gates on the FACE region
+// size (rejects "error_src_face_too_small") not just image size, so we (1) zoom
+// toward the face via a centered heuristic crop, then (2) upscale so the short
+// side is >= FACE_FILL_SHORT (long capped at 4096). Returns JPEG. EXIF rotation
+// is applied first so the crop geometry matches what the model sees.
+const FACE_FILL_SHORT = 1440;
+const MAX_LONG = 4096;
 async function normalizeImage(imageBuffer: Buffer): Promise<{ buffer: Buffer; mime: string }> {
-  const meta = await sharp(imageBuffer).metadata();
+  // Bake in EXIF orientation first so crop coordinates are on the upright image.
+  const oriented = await sharp(imageBuffer).rotate().toBuffer();
+  const meta = await sharp(oriented).metadata();
   const w = meta.width ?? 0;
   const h = meta.height ?? 0;
-  let pipeline = sharp(imageBuffer).rotate(); // honor EXIF orientation
-  const shortSide = Math.min(w, h);
-  const longSide = Math.max(w, h);
-  if (shortSide > 0 && shortSide < 1080) {
-    const scale = 1080 / shortSide;
-    pipeline = pipeline.resize(Math.round(w * scale), Math.round(h * scale));
-  } else if (longSide > 4096) {
-    pipeline = pipeline.resize(w >= h ? 4096 : undefined, h > w ? 4096 : undefined, { fit: "inside" });
+
+  let pipeline = sharp(oriented);
+  let cw = w;
+  let ch = h;
+  if (w > 0 && h > 0) {
+    const box = faceFillCrop(w, h);
+    pipeline = pipeline.extract(box);
+    cw = box.width;
+    ch = box.height;
   }
+
+  // Upscale so the (cropped) short side reaches FACE_FILL_SHORT, but never
+  // downscale below native detail; cap the long side at MAX_LONG.
+  if (cw > 0 && ch > 0) {
+    const shortSide = Math.min(cw, ch);
+    const longSide = Math.max(cw, ch);
+    let scale = Math.max(1, FACE_FILL_SHORT / shortSide);
+    if (longSide * scale > MAX_LONG) scale = MAX_LONG / longSide;
+    if (scale !== 1) pipeline = pipeline.resize(Math.round(cw * scale), Math.round(ch * scale));
+  }
+
   const buffer = await pipeline.jpeg({ quality: 92 }).toBuffer();
   return { buffer, mime: "image/jpeg" };
 }

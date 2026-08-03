@@ -7,6 +7,7 @@ import {
   mapConcernsToScores,
   parseSkinAnalysis,
   pollUntilDone,
+  faceFillCrop,
   HD_CONCERNS,
 } from "./skinParse";
 import { rankByBadness } from "./metrics";
@@ -242,6 +243,39 @@ describe("parseSkinAnalysis (real live shape)", () => {
     // concern that visibly matches the photo — proves polarity is correct.
     const top = rankByBadness(s.concerns, "raw_score")[0];
     expect(top.key).toBe("dark_circle");
+  });
+});
+
+describe("faceFillCrop", () => {
+  const sizes: [number, number][] = [[600, 600], [1000, 1000], [2000, 1000], [1000, 2000], [1290, 1600]];
+
+  test("crop box is strictly inside the image bounds for every aspect", () => {
+    for (const [w, h] of sizes) {
+      const b = faceFillCrop(w, h);
+      expect(b.left).toBeGreaterThanOrEqual(0);
+      expect(b.top).toBeGreaterThanOrEqual(0);
+      expect(b.left + b.width).toBeLessThanOrEqual(w);
+      expect(b.top + b.height).toBeLessThanOrEqual(h);
+    }
+  });
+
+  test("box is smaller than the source (it zooms in) and integer-valued", () => {
+    const b = faceFillCrop(1000, 1000);
+    expect(b.width).toBeLessThan(1000);
+    expect(b.height).toBeLessThan(1000);
+    for (const v of [b.left, b.top, b.width, b.height]) expect(Number.isInteger(v)).toBe(true);
+  });
+
+  test("horizontally centered", () => {
+    const b = faceFillCrop(1000, 800);
+    expect(b.left).toBe(Math.round((1000 - b.width) / 2));
+  });
+
+  test("biased upward: keeps more of the top than the bottom (face sits upper-middle)", () => {
+    const b = faceFillCrop(1000, 1000);
+    const removedTop = b.top;
+    const removedBottom = 1000 - (b.top + b.height);
+    expect(removedTop).toBeLessThan(removedBottom);
   });
 });
 

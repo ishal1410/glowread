@@ -180,6 +180,28 @@ export function parseSkinAnalysis(results: unknown): SkinScores {
   return { concerns, skinAge, healthScore, source: "perfectcorp" };
 }
 
+export interface CropBox { left: number; top: number; width: number; height: number; }
+
+// Heuristic "zoom to the face" crop. We can't detect the face without a heavy ML
+// dependency, so we assume the common case — a roughly centered portrait — and
+// crop toward the center, biased slightly UP because a face sits in the upper
+// middle of a frame (headroom above, shoulders/body below). Combined with the
+// upscale in normalizeImage, this enlarges the face region enough to clear
+// Perfect Corp's face-size gate for margin-heavy shots (e.g. passport crops).
+// Limitation: an off-center or tilted face may be cropped wrong (accepted
+// trade-off for zero added dependencies). It only ever ENLARGES the face vs. the
+// old no-crop path, so it cannot make the gate harder to pass.
+const CROP_W = 0.82; // keep 82% of width
+const CROP_H = 0.88; // keep 88% of height
+const TOP_BIAS = 0.35; // remove 35% of the excess from the top, 65% from the bottom
+export function faceFillCrop(w: number, h: number): CropBox {
+  const width = Math.max(1, Math.min(w, Math.round(w * CROP_W)));
+  const height = Math.max(1, Math.min(h, Math.round(h * CROP_H)));
+  const left = Math.round((w - width) / 2);
+  const top = Math.round((h - height) * TOP_BIAS);
+  return { left, top, width, height };
+}
+
 export type PollState =
   | { state: "running" }
   | { state: "success"; results: unknown }
