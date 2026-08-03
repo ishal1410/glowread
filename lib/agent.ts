@@ -110,7 +110,13 @@ function minimalPlan(): AgentPlan {
 // let a slow/degraded provider (AgentRouter has been observed spiking to 40s+)
 // delay the guaranteed response. On expiry we return `base` immediately. Kept
 // well under the route's maxDuration so the function never 504s on narration.
-const NARRATION_BUDGET_MS = 14_000;
+// AgentRouter (free Claude gateway) latency is highly variable — measured 2.7s,
+// 8.4s, and 34.1s on back-to-back calls (it injects a large cached prompt that
+// spikes cache-read time). The old 14s budget dropped every spike to the mock
+// wording. The route now allows up to 150s, so give narration a generous window
+// that covers the spikes; the race still returns the instant narration finishes
+// (usually well under this), so a typical call isn't slowed.
+const NARRATION_BUDGET_MS = 38_000;
 
 // Public entry. Uses the LLM narration layer if configured; otherwise
 // deterministic. Provider preference: AgentRouter (free Claude) > Claude
@@ -303,9 +309,10 @@ async function enrichWithAgentRouter(base: AgentPlan, apiKey: string): Promise<A
         "You are a warm cosmetic skincare coach. Respond with strict JSON only — no preamble, no markdown fences.",
       messages: [{ role: "user", content: narrationPrompt(base) }],
     }),
-    // Typical call is ~7s; cap at 12s so a congestion spike falls through to the
-    // next provider / deterministic base instead of stalling the whole budget.
-    signal: AbortSignal.timeout(12000),
+    // Gateway latency spikes to ~34s under congestion; allow for it (bounded by
+    // NARRATION_BUDGET_MS overall). Too-short here was silently dropping valid
+    // slow responses to the mock wording.
+    signal: AbortSignal.timeout(35000),
   });
   if (!res.ok) return null;
 
