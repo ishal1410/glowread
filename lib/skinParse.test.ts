@@ -6,6 +6,7 @@ import {
   readPollState,
   mapConcernsToScores,
   parseSkinAnalysis,
+  assertUsableScores,
   pollUntilDone,
   faceFillCrop,
   expandFaceBox,
@@ -322,6 +323,23 @@ describe("expandFaceBox", () => {
     expect(b.width).toBeLessThanOrEqual(512);
     expect(b.height).toBeLessThanOrEqual(512);
     expect(b.left + b.width).toBeLessThanOrEqual(512);
+  });
+});
+
+describe("assertUsableScores", () => {
+  test("REGRESSION: a 'success' payload with no concerns is an error, not a skin health of 0", () => {
+    const empty = parseSkinAnalysis({ output: [] });
+    expect(() => assertUsableScores(empty)).toThrow(/no concerns|empty/i);
+  });
+
+  test("passes a real analysis through unchanged", () => {
+    const scores = parseSkinAnalysis({
+      output: [
+        { type: "hd_acne", raw_score: 40, ui_score: 40 },
+        { type: "all", score: 70 },
+      ],
+    });
+    expect(assertUsableScores(scores)).toBe(scores);
   });
 });
 

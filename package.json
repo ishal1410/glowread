@@ -13,9 +13,14 @@
     "@tensorflow/tfjs": "^4.22.0",
     "@tensorflow/tfjs-backend-wasm": "^4.22.0",
     "@vladmandic/face-api": "^1.7.15",
-    "next": "16.2.12",
+    "next": "16.3.0",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "sharp": "^0.35.3"
+  },
+  "//overrides": "next pins sharp ^0.34 for its image optimizer; 0.34.x inherits high-severity libvips CVEs (GHSA-f88m-g3jw-g9cj) and this app pipes user-uploaded images through sharp. Force the patched line everywhere.",
+  "overrides": {
+    "sharp": "^0.35.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

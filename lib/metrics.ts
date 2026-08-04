@@ -35,6 +35,28 @@ export const SEV_COLOR: Record<Severity, string> = {
   low: "var(--good)",
 };
 
+// What one row of the breakdown renders. The bar used to be sized on badness
+// while the label printed ui_score, so an attribute like "Firmness 69" drew a
+// 31% bar — the number and the bar disagreed. Now the bar always shows the
+// number, and polarity is carried by COLOR (badness-derived) plus an explicit
+// higher-is-better marker.
+export interface ConcernRow {
+  value: number;          // the number printed next to the bar
+  fill: number;           // bar width, 0-100 — always equals `value`
+  severity: Severity;     // derived from badness, so colour still means good/bad
+  higherIsBetter: boolean;
+}
+
+export function concernRow(key: string, score: number): ConcernRow {
+  const value = Math.min(100, Math.max(0, Math.round(score)));
+  return {
+    value,
+    fill: value,
+    severity: severityOf(badness(key, score)),
+    higherIsBetter: isAttribute(key),
+  };
+}
+
 // Rank concerns worst-first by badness on the chosen score field. Ranking is
 // always done on raw_score (the model's true signal) so chips, the radial map,
 // and the breakdown all agree on order; ui_score is display-only.

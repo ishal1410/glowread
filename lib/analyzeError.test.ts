@@ -32,4 +32,19 @@ describe("analyzeErrorResponse", () => {
     const r = analyzeErrorResponse("boom");
     expect(r.status).toBe(500);
   });
+
+  test("REGRESSION: an unrelated error that merely contains 'face' is not a photo error", () => {
+    expect(analyzeErrorResponse(new Error("TypeError: iface.surface is not a function")).status).toBe(500);
+    expect(analyzeErrorResponse(new Error("upload failed: 403 SignatureDoesNotMatch")).status).toBe(500);
+  });
+
+  test("an unknown or expired analysis task -> 404 with an actionable message", () => {
+    const r = analyzeErrorResponse(new Error("poll http 404: task not found"));
+    expect(r.status).toBe(404);
+    expect(r.message).toMatch(/new scan/i); // tells the user what to actually do
+  });
+
+  test("REGRESSION: an unrelated error that merely contains 'credential' is not a credit error", () => {
+    expect(analyzeErrorResponse(new Error("invalid credentials for gateway")).status).toBe(500);
+  });
 });

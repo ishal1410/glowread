@@ -6,13 +6,22 @@ import type { AnalyzeResult, UserProfile } from "@/lib/types";
 
 type Phase = "idle" | "analyzing" | "done" | "error";
 
+// Ordered to match what the server actually does. The list ADVANCES and then
+// holds on the last step — it used to loop every 4.5s, so "Detecting face…"
+// reappeared after "Matching real products…" and a slow analysis looked stuck.
 const LOADER_STEPS = [
   "Detecting face…",
   "Scoring your skin concerns…",
   "Reading hydration & texture…",
   "Building your routine…",
   "Matching real products…",
+  "Almost there — the analysis is taking a little longer…",
 ];
+
+// The image formats the API actually accepts (it verifies magic bytes). Listing
+// them explicitly keeps the picker from offering HEIC/AVIF/GIF that would be
+// rejected only AFTER the upload — and makes iOS hand over a converted JPEG.
+const ACCEPTED_IMAGE_TYPES = "image/jpeg,image/png,image/webp";
 
 export default function Home() {
   const [phase, setPhase] = useState<Phase>("idle");
@@ -22,7 +31,34 @@ export default function Home() {
   const [loaderStep, setLoaderStep] = useState(0);
   const [showProfile, setShowProfile] = useState(false);
   const [profile, setProfile] = useState<UserProfile>({});
+  const [budgetInput, setBudgetInput] = useState("");
+  const [budgetError, setBudgetError] = useState("");
+
+  // Keep the typed text, but only let a VALID budget reach the request — and
+  // tell the user when it won't, rather than silently ignoring it.
+  function onBudgetChange(raw: string) {
+    setBudgetInput(raw);
+    if (raw === "") {
+      setBudgetError("");
+      setProfile((p) => ({ ...p, budget: undefined }));
+      return;
+    }
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0) {
+      setBudgetError("Enter 0 or more — this budget won't be applied.");
+      setProfile((p) => ({ ...p, budget: undefined }));
+      return;
+    }
+    setBudgetError("");
+    setProfile((p) => ({ ...p, budget: n }));
+  }
   const fileRef = useRef<HTMLInputElement>(null);
+  // The minimum-loader timer, tracked so a reset (or unmount) can cancel it —
+  // otherwise a late fire flips the app back to "done" after the user left.
+  const revealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const cancelledRef = useRef(false);
+  useEffect(() => () => { if (revealTimer.current) clearTimeout(revealTimer.current); }, []);
 
   // Theme toggle
   const [theme, setTheme] = useState<"light" | "dark">("light");
@@ -39,11 +75,14 @@ export default function Home() {
     localStorage.setItem("theme", next);
   };
 
-  // Cycle loader messages
+  // Advance the loader messages, then hold on the last one.
   useEffect(() => {
     if (phase !== "analyzing") return;
     setLoaderStep(0);
-    const id = setInterval(() => setLoaderStep((s) => (s + 1) % LOADER_STEPS.length), 900);
+    const id = setInterval(
+      () => setLoaderStep((s) => Math.min(s + 1, LOADER_STEPS.length - 1)),
+      1400
+    );
     return () => clearInterval(id);
   }, [phase]);
 
@@ -51,12 +90,17 @@ export default function Home() {
     setPhase("analyzing");
     setError("");
     const started = Date.now();
+    // A real analysis can poll for ~110s. Hold the controller so the user can
+    // actually stop waiting instead of being pinned to the loader.
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const timeout = setTimeout(() => controller.abort(), 150000);
     try {
       const res = await fetch("/api/analyze", {
         method: "POST",
         // Never let the loader spin forever if the route stalls. Must exceed the
         // server budget (poll up to ~110s + init/put/task + narration).
-        signal: AbortSignal.timeout(150000),
+        signal: controller.signal,
         ...(body instanceof FormData
           ? { body }
           : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
@@ -68,16 +112,131 @@ export default function Home() {
         throw new Error(errData?.error || "Something went wrong analyzing your skin. Please try again.");
       }
       const data: AnalyzeResult = await res.json();
-      // Keep the loader on screen at least ~2.2s so it feels considered.
-      const wait = Math.max(0, 2200 - (Date.now() - started));
-      setTimeout(() => {
-        setResult(data);
-        setPhase("done");
-      }, wait);
+      finishAnalyze(data, started);
     } catch (e) {
+      // A user-initiated cancel is not an error — go quietly back to the start.
+      if (cancelledRef.current) {
+        cancelledRef.current = false;
+        setPhase("idle");
+        return;
+      }
       setError(e instanceof Error ? e.message : "Something went wrong analyzing your skin. Please try again.");
       setPhase("error");
+    } finally {
+      clearTimeout(timeout);
+      abortRef.current = null;
     }
+  }
+
+  function cancelAnalyze() {
+    cancelledRef.current = true;
+    abortRef.current?.abort();
+    if (revealTimer.current) { clearTimeout(revealTimer.current); revealTimer.current = null; }
+    setPreview((prev) => { if (prev) URL.revokeObjectURL(prev); return null; });
+    setPhase("idle");
+  }
+
+  // Fetch the warmer LLM wording AFTER the reveal is on screen and swap it in.
+  // Blocking the analysis on it used to cost up to 35s for copy the
+  // deterministic core already had; failure here is silent by design.
+  async function narrate(data: AnalyzeResult) {
+    if (!data.plan.top_concerns.length) return;
+    try {
+      const res = await fetch("/api/narrate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(40000), // exceeds the server's narration budget
+        body: JSON.stringify({
+          concerns: data.plan.top_concerns.map((c) => ({ concern: c.concern, severity: c.severity })),
+        }),
+      });
+      if (!res.ok) return;
+      const n: { headline?: string; explanations?: Record<string, string> } = await res.json();
+      if (!n.headline && !n.explanations) return;
+      setResult((prev) =>
+        prev === data
+          ? {
+              ...prev,
+              plan: {
+                ...prev.plan,
+                headline: n.headline || prev.plan.headline,
+                top_concerns: prev.plan.top_concerns.map((c) => ({
+                  ...c,
+                  explanation: n.explanations?.[c.concern] || c.explanation,
+                })),
+              },
+            }
+          : prev
+      );
+    } catch {
+      // cosmetic only — keep the deterministic wording
+    }
+  }
+
+  // Upload a photo: /start does the fast work (face detect, upload, task
+  // creation) and hands back a task id; we then poll /status ourselves. The wait
+  // lives here in the browser rather than inside one long server request, which
+  // a serverless platform would kill at its time cap (Vercel Hobby: 60s).
+  async function runUpload(file: File) {
+    setPhase("analyzing");
+    setError("");
+    const started = Date.now();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    try {
+      const fd = new FormData();
+      fd.append("image", file);
+      fd.append("profile", JSON.stringify(profile));
+      const startRes = await fetch("/api/analyze/start", { method: "POST", body: fd, signal: controller.signal });
+      const startData = await startRes.json().catch(() => null);
+      if (!startRes.ok) throw new Error(startData?.error || "Something went wrong analyzing your skin. Please try again.");
+
+      // No API key configured: /start already returned sample data.
+      if (startData?.state === "success") return finishAnalyze(startData.result, started);
+
+      const taskId = startData?.taskId;
+      if (!taskId) throw new Error("Something went wrong analyzing your skin. Please try again.");
+
+      // Poll until it lands. Generous ceiling — a live HD analysis has been seen
+      // taking well over a minute, and the user can Cancel at any point.
+      const deadline = Date.now() + 4 * 60 * 1000;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 2000));
+        if (controller.signal.aborted) return;
+        const res = await fetch("/api/analyze/status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({ taskId, profile }),
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) throw new Error(data?.error || "Something went wrong analyzing your skin. Please try again.");
+        if (data?.state === "success") return finishAnalyze(data.result, started);
+      }
+      throw new Error("That took longer than expected. Please try again.");
+    } catch (e) {
+      if (cancelledRef.current) {
+        cancelledRef.current = false;
+        setPhase("idle");
+        return;
+      }
+      setError(e instanceof Error ? e.message : "Something went wrong analyzing your skin. Please try again.");
+      setPhase("error");
+    } finally {
+      abortRef.current = null;
+    }
+  }
+
+  // Hold the loader on screen briefly so the reveal doesn't flash past.
+  function finishAnalyze(data: AnalyzeResult, started: number) {
+    const wait = Math.max(0, 2200 - (Date.now() - started));
+    if (revealTimer.current) clearTimeout(revealTimer.current);
+    revealTimer.current = setTimeout(() => {
+      revealTimer.current = null;
+      setResult(data);
+      setPhase("done");
+      narrate(data);
+    }, wait);
   }
 
   function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -87,10 +246,7 @@ export default function Home() {
       if (prev) URL.revokeObjectURL(prev);
       return URL.createObjectURL(f);
     });
-    const fd = new FormData();
-    fd.append("image", f);
-    fd.append("profile", JSON.stringify(profile));
-    runAnalyze(fd);
+    runUpload(f);
     // Clear so re-selecting the SAME file still fires onChange next time.
     e.target.value = "";
   }
@@ -101,6 +257,7 @@ export default function Home() {
   }
 
   function reset() {
+    if (revealTimer.current) { clearTimeout(revealTimer.current); revealTimer.current = null; }
     setResult(null);
     setPreview((prev) => {
       if (prev) URL.revokeObjectURL(prev);
@@ -138,20 +295,25 @@ export default function Home() {
           <div className="mt-8 flex flex-col sm:flex-row gap-3 justify-center items-center">
             <button className="btn-primary" onClick={() => fileRef.current?.click()}>📸 Analyze my selfie</button>
             <button className="btn-ghost" onClick={runDemo}>Try a demo</button>
-            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onPickFile} />
+            <input ref={fileRef} type="file" accept={ACCEPTED_IMAGE_TYPES} className="hidden" onChange={onPickFile} />
           </div>
 
           {/* Optional personalization (scan-first: collapsed by default) */}
           <div className="mt-6">
-            <button className="text-sm link-accent" onClick={() => setShowProfile((v) => !v)}>
+            {/* py-2.5 keeps this a >=24px tap target on mobile (it was 20px). */}
+            <button className="text-sm link-accent px-2 py-2.5" onClick={() => setShowProfile((v) => !v)}>
               {showProfile ? "Hide personalization" : "Personalize (optional)"}
             </button>
             {showProfile && (
               <div className="card p-5 mt-3 text-left grid sm:grid-cols-2 gap-4 rise">
                 <label className="text-sm">
                   Skin type
+                  {/* Explicit background/colour, NOT bg-transparent: the native
+                      dropdown popup is painted from the control's own used
+                      colours, and a transparent one falls back to white — an
+                      unreadable light list over the dark UI. */}
                   <select
-                    className="mt-1 w-full rounded-lg p-2 bg-transparent border"
+                    className="mt-1 w-full rounded-lg p-2 border field"
                     style={{ borderColor: "var(--border)" }}
                     value={profile.skinType ?? ""}
                     onChange={(e) => setProfile((p) => ({ ...p, skinType: (e.target.value || undefined) as UserProfile["skinType"] }))}
@@ -168,19 +330,30 @@ export default function Home() {
                   Budget per product (USD)
                   <input
                     type="number" min={0} placeholder="e.g. 25"
-                    className="mt-1 w-full rounded-lg p-2 bg-transparent border"
-                    style={{ borderColor: "var(--border)" }}
-                    value={profile.budget ?? ""}
-                    onChange={(e) => setProfile((p) => ({ ...p, budget: e.target.value ? Number(e.target.value) : undefined }))}
+                    className="mt-1 w-full rounded-lg p-2 border field"
+                    style={{ borderColor: budgetError ? "var(--high)" : "var(--border)" }}
+                    aria-invalid={!!budgetError}
+                    aria-describedby={budgetError ? "budget-error" : undefined}
+                    value={budgetInput}
+                    onChange={(e) => onBudgetChange(e.target.value)}
                   />
+                  {/* A negative budget used to be accepted by the field, dropped
+                      silently by the server, and the user got the full-price
+                      catalog believing their cap had applied. Say so instead. */}
+                  {budgetError && (
+                    <span id="budget-error" className="block mt-1 text-xs" style={{ color: "var(--high)" }}>
+                      {budgetError}
+                    </span>
+                  )}
                 </label>
-                <label className="text-sm flex items-center gap-2">
-                  <input type="checkbox" checked={!!profile.sensitive}
+                {/* w-6 h-6 = 24px, the WCAG 2.5.8 minimum (these were 13px). */}
+                <label className="text-sm flex items-center gap-2 py-1 cursor-pointer">
+                  <input type="checkbox" className="w-6 h-6 shrink-0" checked={!!profile.sensitive}
                     onChange={(e) => setProfile((p) => ({ ...p, sensitive: e.target.checked }))} />
                   Sensitive skin
                 </label>
-                <label className="text-sm flex items-center gap-2">
-                  <input type="checkbox" checked={!!profile.pregnant}
+                <label className="text-sm flex items-center gap-2 py-1 cursor-pointer">
+                  <input type="checkbox" className="w-6 h-6 shrink-0" checked={!!profile.pregnant}
                     onChange={(e) => setProfile((p) => ({ ...p, pregnant: e.target.checked }))} />
                   Pregnant / breastfeeding
                 </label>
@@ -220,6 +393,8 @@ export default function Home() {
               }} />
             ))}
           </div>
+          {/* A live analysis can poll for ~110s — let the user out of it. */}
+          <button className="btn-ghost mt-7" onClick={cancelAnalyze}>Cancel</button>
         </section>
       )}
 

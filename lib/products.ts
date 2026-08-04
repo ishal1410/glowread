@@ -120,9 +120,12 @@ export function matchProducts(
     .sort((a, b) => b.score - a.score || a.product.price - b.product.price)
     .map((s) => s.product);
 
-  // Fallback: if the budget filtered everything out, retry without the cap
-  // rather than showing an empty grid.
-  if (matched.length === 0 && hasBudget) return matchProducts(criteria, undefined, excludeIngredients);
+  // Fallback: if the budget left nothing to actually recommend, retry without
+  // the cap rather than showing a bare grid. "Nothing" includes the case where
+  // only the always-shown sunscreen survived — which is itself over budget, so
+  // a $1 budget used to return a single $41 product and nothing else.
+  const usable = matched.filter((p) => p.category !== "Sunscreen" || !hasBudget || p.price <= budget!);
+  if (usable.length === 0 && hasBudget) return matchProducts(criteria, undefined, excludeIngredients);
 
   return matched;
 }

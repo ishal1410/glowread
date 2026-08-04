@@ -7,6 +7,10 @@
  * ------------------------------------------------------------------ */
 
 :root, :root[data-theme="dark"] {
+  /* Tell the browser which way native widgets should render. Without this the
+     select popup, checkboxes, number spinners and scrollbars stay in LIGHT
+     mode while the page text is near-white — a white-on-white dropdown. */
+  color-scheme: dark;
   --bg: #0c0d12;
   --bg-2: #12131a;
   --surface: #16171f;
@@ -15,6 +19,10 @@
   --text: #eceef4;
   --muted: #9a9db2;
   --violet: #837cff;
+  /* Filled-button background. --violet is tuned as a GLOW colour, and white on
+     it measures only 3.34:1 — below AA for button text. This is the same hue,
+     darkened just far enough to clear 4.5:1. */
+  --violet-strong: #645bff;
   --violet-2: #a99fff;
   --violet-soft: #24223c;
   --good: #4fd9c6;
@@ -25,6 +33,7 @@
 }
 
 :root[data-theme="light"] {
+  color-scheme: light;
   --bg: #eceef3;
   --bg-2: #e4e6ee;
   --surface: #fbfbfd;
@@ -33,23 +42,49 @@
   --text: #14151d;
   --muted: #676a7e;
   --violet: #5b50e6;
-  --violet-2: #7a6ff0;
+  --violet-strong: #5b50e6; /* white on it = 5.62:1, already fine */
+  /* These four are TEXT colours on light surfaces (severity labels, prices,
+     links, the health readout). The dark-theme values were tuned to glow on
+     near-black and measured 2.6-3.4:1 here — all below AA. Same hues,
+     darkened until every light surface (#fbfbfd/#f2f3f8/#eceef3/#e9e7fb)
+     clears 4.5:1. */
+  --violet-2: #5a4cec;
   --violet-soft: #e9e7fb;
-  --good: #17a594;
-  --mid: #c07d16;
-  --high: #e14b6e;
+  --good: #107468;
+  --mid: #8e5c10;
+  --high: #c62148;
   --glow: rgba(91, 80, 230, 0.28);
   --shadow: 0 20px 60px -26px rgba(60, 55, 120, 0.28);
 }
 
 @media (prefers-color-scheme: light) {
   :root:not([data-theme]) {
+    color-scheme: light;
     --bg: #eceef3; --bg-2: #e4e6ee; --surface: #fbfbfd; --surface-2: #f2f3f8;
     --border: #e0e2ec; --text: #14151d; --muted: #676a7e; --violet: #5b50e6;
-    --violet-2: #7a6ff0; --violet-soft: #e9e7fb; --good: #17a594; --mid: #c07d16;
-    --high: #e14b6e; --glow: rgba(91, 80, 230, 0.28);
+    --violet-strong: #5b50e6;
+    --violet-2: #5a4cec; --violet-soft: #e9e7fb; --good: #107468; --mid: #8e5c10;
+    --high: #c62148; --glow: rgba(91, 80, 230, 0.28);
     --shadow: 0 20px 60px -26px rgba(60, 55, 120, 0.28);
   }
+}
+
+/* Form fields. The native select popup and the number spinners are painted by
+   the browser from the CONTROL'S OWN used colours — a transparent background
+   resolves to the white canvas, which is why the dropdown list rendered light
+   and unreadable over the dark UI. Declaring both colours (and repeating them
+   on <option>, which does not inherit them in Chromium) pins the popup to the
+   theme instead of leaving it to `color-scheme` alone. */
+.field,
+.field option {
+  background-color: var(--surface-2);
+  color: var(--text);
+}
+
+.field option:checked,
+.field option:hover {
+  background-color: var(--violet-soft);
+  color: var(--text);
 }
 
 body {
@@ -107,7 +142,7 @@ body {
 
 /* Controls */
 .btn-primary {
-  background: var(--violet); color: #fff; border: none;
+  background: var(--violet-strong); color: #fff; border: none;
   border-radius: 999px; padding: 0.85rem 1.9rem; font-weight: 600;
   cursor: pointer; transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.15s ease;
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--violet) 40%, transparent), 0 12px 32px -10px var(--glow);

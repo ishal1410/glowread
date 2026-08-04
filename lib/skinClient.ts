@@ -4,7 +4,7 @@
 import sharp from "sharp";
 import type { SkinScores } from "./types";
 import { getMockScores, MOCK_VARIANTS } from "./mockSkin";
-import { parseInitResponse, buildTaskBody, parseTaskId, readPollState, pollUntilDone, parseSkinAnalysis, faceFillCrop, expandFaceBox, HD_CONCERNS } from "./skinParse";
+import { parseInitResponse, buildTaskBody, parseTaskId, readPollState, parseSkinAnalysis, assertUsableScores, faceFillCrop, expandFaceBox, HD_CONCERNS } from "./skinParse";
 import { detectFace } from "./faceDetect";
 
 // Thrown when local face detection runs and finds no face — the caller maps this
@@ -21,19 +21,13 @@ export function isRealMode(): boolean {
   return !!process.env.PERFECTCORP_API_KEY;
 }
 
-// Entry point used by the API route.
-export async function analyzeSkin(
-  imageBuffer: Buffer | null,
-  opts?: { variant?: string; mime?: string }
-): Promise<SkinScores> {
-  if (!isRealMode() || !imageBuffer) {
-    // Deterministic-ish variety across demo runs.
-    const variant = opts?.variant && MOCK_VARIANTS.includes(opts.variant)
-      ? opts.variant
-      : MOCK_VARIANTS[imageBuffer ? imageBuffer.length % MOCK_VARIANTS.length : 0];
-    return getMockScores(variant);
-  }
-  return analyzeSkinReal(imageBuffer, opts?.mime ?? "image/jpeg");
+// Sample scores for the demo path, and for an uploaded photo when no API key is
+// configured (a fresh clone). The live path is startRealAnalysis + pollRealAnalysis.
+export function mockScoresFor(opts?: { variant?: string; imageBytes?: number }): SkinScores {
+  const variant = opts?.variant && MOCK_VARIANTS.includes(opts.variant)
+    ? opts.variant
+    : MOCK_VARIANTS[opts?.imageBytes ? opts.imageBytes % MOCK_VARIANTS.length : 0];
+  return getMockScores(variant);
 }
 
 // Prepare the image for HD skin analysis. Perfect Corp gates on the FACE region
@@ -86,8 +80,13 @@ async function normalizeImage(imageBuffer: Buffer): Promise<{ buffer: Buffer; mi
   return { buffer, mime: "image/jpeg" };
 }
 
-// Real Perfect Corp flow. Kept isolated so the mock path is untouched.
-async function analyzeSkinReal(imageBuffer: Buffer, _mime: string): Promise<SkinScores> {
+// Kick off a live analysis and return the upstream task id, WITHOUT waiting for
+// it to finish. The wait is what breaks on serverless: a real analysis has been
+// observed taking >55s, and a platform that caps a function at 60s kills it
+// mid-poll. Splitting start/poll keeps every request short, so the client can
+// wait as long as it likes. Face detection still runs here, so a photo with no
+// face is rejected before a paid unit is spent.
+export async function startRealAnalysis(imageBuffer: Buffer): Promise<string> {
   const key = process.env.PERFECTCORP_API_KEY!;
   const auth = { Authorization: `Bearer ${key}` };
 
@@ -121,31 +120,29 @@ async function analyzeSkinReal(imageBuffer: Buffer, _mime: string): Promise<Skin
     signal: AbortSignal.timeout(10000),
   });
   if (!taskRes.ok) throw new Error(`task create failed: ${taskRes.status} ${await taskRes.text().catch(() => "")}`);
-  const taskId = parseTaskId(await taskRes.json());
+  return parseTaskId(await taskRes.json());
+}
 
-  // 4) poll for result. Real HD/SD analysis observed taking >25s, so the window
-  // is generous. Transient poll errors are tolerated (pollUntilDone). NOTE: on
-  // Vercel Hobby (maxDuration cap) very slow analyses may still exceed the
-  // function budget — client-side polling is the durable fix (follow-up).
-  const results = await pollUntilDone({
-    pollOnce: async () => {
-      const poll = await fetch(`${BASE}/s2s/v2.0/task/skin-analysis/${taskId}`, {
-        headers: auth,
-        signal: AbortSignal.timeout(8000),
-      });
-      if (!poll.ok) throw new Error(`poll http ${poll.status}`); // transient -> retried
-      return readPollState(await poll.json());
-    },
-    now: () => Date.now(),
-    sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
-    // Real HD analysis is highly variable (seen 20s, seen >55s under congestion).
-    // A too-short budget killed valid slow analyses. Generous window; the durable
-    // fix for very slow runs on serverless is client-side polling (follow-up).
-    budgetMs: 110000,
-    intervalMs: 1500,
+// One poll of a running task. Returns immediately in every case, so the caller
+// (a serverless function) is never at risk of the platform's time cap. Mapping
+// of the success payload -> SkinScores is pinned to a real capture and TDD'd in
+// skinParse.test.ts; a "success" carrying an unusable payload is an error, not
+// a skin health of 0.
+export type AnalysisState =
+  | { state: "running" }
+  | { state: "success"; scores: SkinScores }
+  | { state: "error"; error: string };
+
+export async function pollRealAnalysis(taskId: string): Promise<AnalysisState> {
+  const key = process.env.PERFECTCORP_API_KEY!;
+  const poll = await fetch(`${BASE}/s2s/v2.0/task/skin-analysis/${encodeURIComponent(taskId)}`, {
+    headers: { Authorization: `Bearer ${key}` },
+    signal: AbortSignal.timeout(8000),
   });
+  if (!poll.ok) throw new Error(`poll http ${poll.status}`); // transient -> client retries
 
-  // Map the live success payload -> app SkinScores. Shape + polarity are pinned to
-  // a real capture and TDD'd in skinParse.test.ts (parseSkinAnalysis).
-  return parseSkinAnalysis(results);
+  const state = readPollState(await poll.json());
+  if (state.state === "running") return { state: "running" };
+  if (state.state === "error") return { state: "error", error: state.error };
+  return { state: "success", scores: assertUsableScores(parseSkinAnalysis(state.results)) };
 }

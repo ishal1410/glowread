@@ -32,6 +32,22 @@ describe("matchProducts", () => {
     expect(out.every((p) => !p.key_ingredients.some((i) => banned.includes(i.toLowerCase())))).toBe(true);
   });
 
+  it("REGRESSION: a budget that only leaves the always-shown sunscreen falls back to the full catalog", () => {
+    // $1 budget: every real match is filtered out, and only the SPF bypass
+    // survives — which is itself over budget. Showing that alone is worse than
+    // showing the (clearly priced) unbudgeted list.
+    const out = matchProducts([crit("oiliness", "niacinamide"), crit("acne", "salicylic acid")], 1);
+    const nonSunscreen = out.filter((p) => p.category !== "Sunscreen");
+    expect(nonSunscreen.length).toBeGreaterThan(0);
+  });
+
+  it("keeps a real budget working when affordable matches exist", () => {
+    const out = matchProducts([crit("oiliness", "niacinamide")], 10);
+    const overBudget = out.filter((p) => p.category !== "Sunscreen" && p.price > 10);
+    expect(overBudget).toHaveLength(0);
+    expect(out.length).toBeGreaterThan(0);
+  });
+
   it("is deterministic (stable order across calls)", () => {
     const a = matchProducts([crit("oiliness", "niacinamide")]).map((p) => p.id);
     const b = matchProducts([crit("oiliness", "niacinamide")]).map((p) => p.id);

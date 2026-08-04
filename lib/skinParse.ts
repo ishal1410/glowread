@@ -180,6 +180,15 @@ export function parseSkinAnalysis(results: unknown): SkinScores {
   return { concerns, skinAge, healthScore, source: "perfectcorp" };
 }
 
+// A task can report "success" while carrying an unusable payload (missing or
+// empty results). Parsing that yields zero concerns and healthScore 0, which
+// the UI happily renders as "skin health 0" over a generic routine. Treat it as
+// a failure so the user gets an honest error instead of an invented reading.
+export function assertUsableScores(scores: SkinScores): SkinScores {
+  if (!scores.concerns.length) throw new Error("analysis returned no concerns");
+  return scores;
+}
+
 export interface CropBox { left: number; top: number; width: number; height: number; }
 
 // Heuristic "zoom to the face" crop. We can't detect the face without a heavy ML

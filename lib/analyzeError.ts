@@ -12,16 +12,30 @@ export interface AnalyzeErrorResponse {
 export function analyzeErrorResponse(err: unknown): AnalyzeErrorResponse {
   const msg = err instanceof Error ? err.message : String(err);
 
-  // Bad input photo — the user can fix this by retaking the shot.
-  if (/face_too_small|no_face|face/i.test(msg)) {
+  // Bad input photo — the user can fix this by retaking the shot. Matched on
+  // the specific upstream/internal signals only: a bare /face/ also matched
+  // unrelated failures ("iface.surface is not a function") and turned a server
+  // bug into "your photo is bad".
+  if (/face_too_small|no_face|face_not_detected|face_too_large|no face detected/i.test(msg)) {
     return {
       status: 400,
       message: "We couldn't read your face clearly. Please upload a well-lit photo showing your whole face up close.",
     };
   }
 
+  // The polled task is gone (expired, or a stale id from an old tab). Not a
+  // server fault and not retryable against the same task — ask for a new scan.
+  if (/poll http 404|task not found|invalid task/i.test(msg)) {
+    return {
+      status: 404,
+      message: "That analysis is no longer available. Please run a new scan.",
+    };
+  }
+
   // Upstream credits exhausted — not the user's fault; a transient service state.
-  if (/creditinsufficiency|credit/i.test(msg)) {
+  // "credential" must NOT match here — that is our misconfiguration, not an
+  // upstream credit state.
+  if (/creditinsufficiency|credit_insufficient|insufficient credit|out of credit|quota/i.test(msg)) {
     return {
       status: 503,
       message: "Skin analysis is temporarily unavailable. Please try again later.",

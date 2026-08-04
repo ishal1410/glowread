@@ -4,8 +4,9 @@
 // is absent or returns bad output, we fall back to the deterministic plan (P16).
 
 import Anthropic from "@anthropic-ai/sdk";
-import type { SkinScores, AgentPlan, TopConcern, RoutineStep, ProductCriterion } from "./types";
+import type { SkinScores, AgentPlan, TopConcern, RoutineStep, ProductCriterion, Severity } from "./types";
 import { CONCERN_INGREDIENTS } from "./products";
+import { CONCERN_LABELS } from "./mockSkin";
 import { badness, severityOf, rankByBadness } from "./metrics";
 
 const EXPLANATIONS: Record<string, string> = {
@@ -22,6 +23,22 @@ const EXPLANATIONS: Record<string, string> = {
   dark_circle: "The area under your eyes looks shadowed or puffy. Caffeine and a little brightening help it look more rested.",
   radiance: "Your skin looks a little dull. Antioxidants and gentle exfoliation bring the glow back.",
 };
+
+// The shelf category a given active is bought as, where it isn't a plain
+// treatment (so the routine step and the matched product card agree).
+const PRODUCT_TYPE: Record<string, string> = {
+  caffeine: "Eye cream",
+  "glycolic acid": "Exfoliant",
+  "salicylic acid": "Exfoliant",
+  peptides: "Serum",
+  niacinamide: "Serum",
+  "vitamin c": "Serum",
+};
+
+// Number steps 1..n at build time so a slot can never ship with gaps.
+function withOrder(steps: Omit<RoutineStep, "order">[]): RoutineStep[] {
+  return steps.map((s, i) => ({ ...s, order: i + 1 }));
+}
 
 // Rank by "badness" (polarity-aware): positive attributes like firmness only
 // count as a concern when they're LOW. Pick the worst 3 as "top concerns".
@@ -52,23 +69,44 @@ export function buildPlanFromScores(scores: SkinScores): AgentPlan {
     }
   }
 
-  // Build a simple, safe routine from the strongest concern's active.
-  const primary = top[0];
-  const primaryActive = (CONCERN_INGREDIENTS[primary.key] ?? ["niacinamide"])[0];
-  const brightening = top.some((c) => ["spot", "pigmentation", "radiance"].includes(c.key));
+  // Build a simple, safe routine that actually USES what we recommend. Only the
+  // #1 concern's active used to reach the routine, so a user could be sold a
+  // caffeine eye serum for their #2 concern that no step ever mentions. Take
+  // the top TWO concerns' primary actives — two is the cap, because layering
+  // three actives is an irritation risk, not a better routine.
+  const actives: { ingredient: string; label: string }[] = [];
+  for (const c of top.slice(0, 2)) {
+    const ingredient = (CONCERN_INGREDIENTS[c.key] ?? ["niacinamide"])[0];
+    if (ingredient && !actives.some((a) => a.ingredient === ingredient)) {
+      actives.push({ ingredient, label: c.label.toLowerCase() });
+    }
+  }
 
-  const AM: RoutineStep[] = [
-    { order: 1, product_type: "Cleanser", ingredient: "glycerin", why: "Start clean without stripping the barrier." },
-    ...(brightening ? [{ order: 2, product_type: "Serum", ingredient: "vitamin c", why: "Antioxidant brightening; pairs well with daytime SPF." }] : []),
-    { order: 3, product_type: "Moisturizer", ingredient: "hyaluronic acid", why: "Lock in hydration for a plump, healthy look." },
-    { order: 4, product_type: "Sunscreen", ingredient: "spf", why: "The best daily habit for protecting your skin and slowing aging." },
-  ];
+  // Vitamin C belongs in the morning (antioxidant + SPF); everything else is a
+  // PM treatment. Also brighten in the AM when any top concern calls for it.
+  const brightening =
+    top.some((c) => ["spot", "pigmentation", "radiance"].includes(c.key)) ||
+    actives.some((a) => a.ingredient === "vitamin c");
+  const pmActives = actives.filter((a) => a.ingredient !== "vitamin c");
 
-  const PM: RoutineStep[] = [
-    { order: 1, product_type: "Cleanser", ingredient: "glycerin", why: "Remove the day's buildup and sunscreen." },
-    { order: 2, product_type: "Treatment", ingredient: primaryActive, why: `Targets your top concern: ${primary.label.toLowerCase()}.` },
-    { order: 3, product_type: "Moisturizer", ingredient: "ceramides", why: "Repair the barrier overnight." },
-  ];
+  const AM: RoutineStep[] = withOrder([
+    { product_type: "Cleanser", ingredient: "glycerin", why: "Start clean without stripping the barrier." },
+    ...(brightening ? [{ product_type: "Serum", ingredient: "vitamin c", why: "Antioxidant brightening; pairs well with daytime SPF." }] : []),
+    { product_type: "Moisturizer", ingredient: "hyaluronic acid", why: "Lock in hydration for a plump, healthy look." },
+    { product_type: "Sunscreen", ingredient: "spf", why: "The best daily habit for protecting your skin and slowing aging." },
+  ]);
+
+  const PM: RoutineStep[] = withOrder([
+    { product_type: "Cleanser", ingredient: "glycerin", why: "Remove the day's buildup and sunscreen." },
+    ...pmActives.map((a, i) => ({
+      product_type: PRODUCT_TYPE[a.ingredient] ?? "Treatment",
+      ingredient: a.ingredient,
+      why: i === 0
+        ? `Targets your top concern: ${a.label}.`
+        : `Also treats ${a.label}. Introduce it on alternate nights so your skin adjusts.`,
+    })),
+    { product_type: "Moisturizer", ingredient: "ceramides", why: "Repair the barrier overnight." },
+  ]);
 
   return {
     headline: `Your skin's top focus: ${top.map((c) => c.label.toLowerCase()).join(", ")}.`,
@@ -111,58 +149,83 @@ function minimalPlan(): AgentPlan {
 // delay the guaranteed response. On expiry we return `base` immediately. Kept
 // well under the route's maxDuration so the function never 504s on narration.
 // AgentRouter (free Claude gateway) latency is highly variable — measured 2.7s,
-// 8.4s, and 34.1s on back-to-back calls (it injects a large cached prompt that
-// spikes cache-read time). The old 14s budget dropped every spike to the mock
-// wording. The route now allows up to 150s, so give narration a generous window
-// that covers the spikes; the race still returns the instant narration finishes
-// (usually well under this), so a typical call isn't slowed.
-const NARRATION_BUDGET_MS = 38_000;
+// 8.4s and 34.1s on back-to-back calls (it injects a large cached prompt that
+// spikes cache-read time). Because narration no longer blocks the reveal, a
+// slow gateway costs the user nothing: the copy simply swaps in late. So the
+// budget is generous enough to cover the observed tail rather than throwing
+// away work that was nearly done.
+const NARRATION_BUDGET_MS = 30_000;
 
-// Public entry. Uses the LLM narration layer if configured; otherwise
-// deterministic. Provider preference: AgentRouter (free Claude) > Claude
-// (sponsor-aligned) > Gemini (free fallback) > deterministic base. The whole
-// chain races a single wall-clock deadline; whoever loses, `base` (P16) is
-// returned so the response can never break or hang.
-export async function getPlan(scores: SkinScores): Promise<AgentPlan> {
-  const base = buildPlanFromScores(scores);
+// What the narration endpoint accepts. ONLY the concern key and severity are
+// taken from the client: labels are re-derived from our own map, so no client
+// text ever reaches the model prompt. That keeps the endpoint from doubling as
+// a free, injectable LLM proxy.
+export interface NarrationConcern { key: string; label: string; severity: Severity }
+const SEVERITIES: readonly string[] = ["low", "moderate", "high"];
+
+export function sanitizeNarrationConcerns(raw: unknown): NarrationConcern[] {
+  if (!Array.isArray(raw)) return [];
+  const out: NarrationConcern[] = [];
+  for (const item of raw.slice(0, 8)) {
+    if (!item || typeof item !== "object") continue;
+    const r = item as Record<string, unknown>;
+    const key = typeof r.concern === "string" ? r.concern : typeof r.key === "string" ? r.key : "";
+    const severity = typeof r.severity === "string" ? r.severity : "";
+    if (!CONCERN_LABELS[key] || !SEVERITIES.includes(severity)) continue;
+    if (out.some((c) => c.key === key)) continue;
+    out.push({ key, label: CONCERN_LABELS[key], severity: severity as Severity });
+    if (out.length === 3) break;
+  }
+  return out;
+}
+
+// Narrate a set of concerns. Provider preference: AgentRouter (free Claude) >
+// Claude (sponsor-aligned) > Gemini (free fallback). The whole chain races one
+// wall-clock deadline and resolves to null on expiry or failure — narration is
+// cosmetic, so the caller simply keeps the deterministic wording.
+//
+// This deliberately runs OFF the analyze path: blocking the response on it cost
+// a measured 35.3s end-to-end for copy the deterministic core already had.
+export async function narrate(concerns: NarrationConcern[]): Promise<Narration | null> {
+  if (!concerns.length) return null;
 
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<AgentPlan>((resolve) => {
-    timer = setTimeout(() => resolve(base), NARRATION_BUDGET_MS);
+  const deadline = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), NARRATION_BUDGET_MS);
   });
   try {
-    return await Promise.race([enrichPlan(base), deadline]);
+    return await Promise.race([runProviders(concerns), deadline]);
   } catch {
-    return base; // any unexpected failure in the chain -> deterministic plan
+    return null;
   } finally {
     clearTimeout(timer);
   }
 }
 
 // Sequential provider fallthrough. Each provider is bounded by its own fetch
-// timeout AND by the overall NARRATION_BUDGET_MS race in getPlan, so this can
+// timeout AND by the overall NARRATION_BUDGET_MS race in narrate(), so this can
 // never block the caller past that budget.
-async function enrichPlan(base: AgentPlan): Promise<AgentPlan> {
+async function runProviders(concerns: NarrationConcern[]): Promise<Narration | null> {
   const routerKey = process.env.AGENTROUTER_API_KEY;
   if (routerKey) {
-    const enriched = await enrichWithRetry(() => enrichWithAgentRouter(base, routerKey));
-    if (enriched) return enriched;
+    const n = await enrichWithRetry(() => narrateWithAgentRouter(concerns, routerKey));
+    if (n) return n;
   }
 
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   if (anthropicKey) {
-    const enriched = await enrichWithRetry(() => enrichWithClaude(base, anthropicKey));
-    if (enriched) return enriched;
+    const n = await enrichWithRetry(() => narrateWithClaude(concerns, anthropicKey));
+    if (n) return n;
     // Claude failed -> fall through to Gemini if configured.
   }
 
   const geminiKey = process.env.GEMINI_API_KEY;
   if (geminiKey) {
-    const enriched = await enrichWithRetry(() => enrichWithGemini(base, geminiKey));
-    if (enriched) return enriched;
+    const n = await enrichWithRetry(() => narrateWithGemini(concerns, geminiKey));
+    if (n) return n;
   }
 
-  return base; // mock-first default (no keys) or all providers failed
+  return null; // no keys configured, or every provider failed
 }
 
 // Runs an enrichment call, retrying ONCE on transient failures (bad JSON, 5xx).
@@ -170,7 +233,7 @@ async function enrichPlan(base: AgentPlan): Promise<AgentPlan> {
 // would just burn another full timeout for the same reason — we fall through to
 // the next provider (or the overall deadline) instead. Errors are swallowed so
 // the caller can always fall through.
-async function enrichWithRetry(fn: () => Promise<AgentPlan | null>): Promise<AgentPlan | null> {
+async function enrichWithRetry(fn: () => Promise<Narration | null>): Promise<Narration | null> {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const enriched = await fn();
@@ -189,7 +252,7 @@ async function enrichWithRetry(fn: () => Promise<AgentPlan | null>): Promise<Age
 // Validate the LLM's narration against the expected schema. Returns null (which
 // triggers a retry, then fallback) on any shape mismatch, and bounds string
 // lengths so a malfunctioning model can't return unbounded text.
-type Narration = { headline?: string; explanations?: Record<string, string> };
+export type Narration = { headline?: string; explanations?: Record<string, string> };
 function validateNarration(x: unknown): Narration | null {
   if (!x || typeof x !== "object") return null;
   const o = x as Record<string, unknown>;
@@ -221,33 +284,21 @@ function parseNarrationJson(text: string): unknown {
   }
 }
 
-// Shared narration prompt. Both providers get the same instruction so the two
-// paths produce comparable copy; only the transport differs.
-function narrationPrompt(base: AgentPlan): string {
+// Shared narration prompt. Every provider gets the same instruction so the
+// paths produce comparable copy; only the transport differs. The concern list
+// is built from OUR vocabulary (see sanitizeNarrationConcerns), never from
+// client-supplied text.
+function narrationPrompt(concerns: NarrationConcern[]): string {
   return `You are a warm, encouraging cosmetic skincare coach (NOT a doctor; never diagnose).
 Given these top concerns, rewrite ONLY the "headline" and each concern "explanation" in plain, friendly language.
 Keep the headline under 140 characters and each explanation under 240 characters — concise and warm.
 Do NOT mention numeric scores. Return strict JSON: {"headline": string, "explanations": {"<concernKey>": string}}.
-Top concerns: ${JSON.stringify(base.top_concerns.map((c) => ({ key: c.concern, label: c.label, severity: c.severity })))}`;
-}
-
-// Merge a validated narration onto the deterministic base. Structure (concerns,
-// routine, criteria) stays from the core, so the output schema can never break.
-function applyNarration(base: AgentPlan, parsed: Narration, source: AgentPlan["source"]): AgentPlan {
-  return {
-    ...base,
-    source,
-    headline: parsed.headline || base.headline,
-    top_concerns: base.top_concerns.map((c) => ({
-      ...c,
-      explanation: parsed.explanations?.[c.concern] || c.explanation,
-    })),
-  };
+Top concerns: ${JSON.stringify(concerns)}`;
 }
 
 // Claude narration layer (sponsor-aligned). Uses the Anthropic SDK; model and
 // effort are tuned for a cheap, fast JSON rewrite rather than deep reasoning.
-async function enrichWithClaude(base: AgentPlan, apiKey: string): Promise<AgentPlan | null> {
+async function narrateWithClaude(concerns: NarrationConcern[], apiKey: string): Promise<Narration | null> {
   // maxRetries: 0 — retry/timeout policy lives in enrichWithRetry + the overall
   // deadline. The SDK default (2) would silently multiply attempts (up to 3 per
   // call) and blow the latency budget.
@@ -264,9 +315,9 @@ async function enrichWithClaude(base: AgentPlan, apiKey: string): Promise<AgentP
       output_config: { effort: "low" },
       system:
         "You are a warm cosmetic skincare coach. Respond with strict JSON only — no preamble, no markdown fences.",
-      messages: [{ role: "user", content: narrationPrompt(base) }],
+      messages: [{ role: "user", content: narrationPrompt(concerns) }],
     },
-    { timeout: 12000 }
+    { timeout: 20000 } // kept under NARRATION_BUDGET_MS
   );
 
   const text = message.content.find((b) => b.type === "text")?.text;
@@ -275,7 +326,7 @@ async function enrichWithClaude(base: AgentPlan, apiKey: string): Promise<AgentP
   const parsed = validateNarration(parseNarrationJson(text));
   if (!parsed) return null; // invalid schema -> caller retries, then next provider
 
-  return applyNarration(base, parsed, "claude");
+  return parsed;
 }
 
 // AgentRouter narration layer: Claude-grade output at $0 via the promo-credit
@@ -284,7 +335,7 @@ async function enrichWithClaude(base: AgentPlan, apiKey: string): Promise<AgentP
 // response typing (content/usage come back undefined). Its WAF also only accepts
 // Claude-Code-shaped traffic, so we present the CLI's client identity headers or
 // it returns 401 unauthorized_client_error. Anthropic wire format otherwise.
-async function enrichWithAgentRouter(base: AgentPlan, apiKey: string): Promise<AgentPlan | null> {
+async function narrateWithAgentRouter(concerns: NarrationConcern[], apiKey: string): Promise<Narration | null> {
   const baseURL = (process.env.AGENTROUTER_BASE_URL || "https://agentrouter.org").replace(/\/+$/, "");
   const model = process.env.AGENTROUTER_MODEL || "claude-opus-5";
 
@@ -307,12 +358,12 @@ async function enrichWithAgentRouter(base: AgentPlan, apiKey: string): Promise<A
       output_config: { effort: "low" },
       system:
         "You are a warm cosmetic skincare coach. Respond with strict JSON only — no preamble, no markdown fences.",
-      messages: [{ role: "user", content: narrationPrompt(base) }],
+      messages: [{ role: "user", content: narrationPrompt(concerns) }],
     }),
-    // Gateway latency spikes to ~34s under congestion; allow for it (bounded by
-    // NARRATION_BUDGET_MS overall). Too-short here was silently dropping valid
-    // slow responses to the mock wording.
-    signal: AbortSignal.timeout(35000),
+    // Bounded by NARRATION_BUDGET_MS overall; keep the socket timeout just
+    // under it so a congested gateway releases the connection rather than
+    // lingering after the race has already resolved.
+    signal: AbortSignal.timeout(28000),
   });
   if (!res.ok) return null;
 
@@ -327,14 +378,14 @@ async function enrichWithAgentRouter(base: AgentPlan, apiKey: string): Promise<A
   const parsed = validateNarration(parseNarrationJson(text));
   if (!parsed) return null; // invalid schema -> caller retries, then next provider
 
-  return applyNarration(base, parsed, "agentrouter");
+  return parsed;
 }
 
 // LLM narration layer: rewrite headline + explanations in a warmer voice.
 // Structure (concerns, routine, criteria) stays from the deterministic core,
 // so the output schema can never break.
-async function enrichWithGemini(base: AgentPlan, apiKey: string): Promise<AgentPlan | null> {
-  const prompt = narrationPrompt(base);
+async function narrateWithGemini(concerns: NarrationConcern[], apiKey: string): Promise<Narration | null> {
+  const prompt = narrationPrompt(concerns);
 
   const res = await fetch(
     "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
@@ -346,7 +397,7 @@ async function enrichWithGemini(base: AgentPlan, apiKey: string): Promise<AgentP
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: { responseMimeType: "application/json" },
       }),
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(15000), // kept under NARRATION_BUDGET_MS
     }
   );
   if (!res.ok) return null;
@@ -357,5 +408,5 @@ async function enrichWithGemini(base: AgentPlan, apiKey: string): Promise<AgentP
   const parsed = validateNarration(parseNarrationJson(text));
   if (!parsed) return null; // invalid schema -> caller retries, then falls back
 
-  return applyNarration(base, parsed, "gemini");
+  return parsed;
 }

@@ -1,6 +1,6 @@
 import type { AnalyzeResult, ConcernScore, RoutineStep, MatchedProduct } from "@/lib/types";
 import { INGREDIENT_RATIONALE, INGREDIENT_SOURCES } from "@/lib/products";
-import { badness, severityOf, SEV_COLOR, rankByBadness } from "@/lib/metrics";
+import { SEV_COLOR, rankByBadness, concernRow } from "@/lib/metrics";
 import { CONCERN_LABELS } from "@/lib/mockSkin";
 import RadialMap from "./RadialMap";
 
@@ -9,18 +9,26 @@ import RadialMap from "./RadialMap";
 const labelForConcern = (k: string) =>
   CONCERN_LABELS[k] ?? k.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
 
+// The bar length always equals the number beside it; polarity is carried by
+// colour (green = doing well) plus an explicit marker on the metrics where a
+// HIGH number is the good outcome (firmness, hydration, radiance).
 function ConcernBar({ concern }: { concern: ConcernScore }) {
-  const b = badness(concern.key, concern.ui_score);
-  const level = severityOf(b);
+  const row = concernRow(concern.key, concern.ui_score);
   return (
     <div>
       <div className="flex justify-between text-sm mb-1.5">
-        <span>{concern.label}</span>
-        <span className="mono" style={{ color: "var(--muted)", fontSize: "0.8rem" }}>{concern.ui_score}</span>
+        <span>
+          {concern.label}
+          {row.higherIsBetter && (
+            <span className="mono ml-1.5" style={{ color: "var(--muted)", fontSize: "0.7rem" }}
+              title="Higher is better for this one">↑ better</span>
+          )}
+        </span>
+        <span className="mono" style={{ color: "var(--muted)", fontSize: "0.8rem" }}>{row.value}</span>
       </div>
       <div className="h-2 rounded-full overflow-hidden" style={{ background: "var(--surface-2)" }}>
         <div className="h-full rounded-full"
-          style={{ width: `${b}%`, background: SEV_COLOR[level], transition: "width 1s ease" }} />
+          style={{ width: `${row.fill}%`, background: SEV_COLOR[row.severity], transition: "width 1s ease" }} />
       </div>
     </div>
   );
