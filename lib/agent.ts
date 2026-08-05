@@ -239,6 +239,10 @@ async function enrichWithRetry(fn: () => Promise<Narration | null>): Promise<Nar
       const enriched = await fn();
       if (enriched) return enriched;
     } catch (err) {
+      // A swallowed provider failure is invisible in production, where the only
+      // symptom is deterministic wording. Log it so a broken key or a blocked
+      // egress is diagnosable from the platform logs.
+      console.error("narration provider failed", err);
       // Don't retry a timeout — it will only stall again. Bail to next provider.
       if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
         return null;
@@ -367,7 +371,18 @@ async function narrateWithAgentRouter(concerns: NarrationConcern[], apiKey: stri
   });
   if (!res.ok) return null;
 
-  const data = await res.json();
+  // The gateway sits behind an Aliyun WAF that answers datacenter IPs with an
+  // HTML anti-bot interstitial carrying a 200 status, so a bare res.json() here
+  // throws a SyntaxError instead of falling through. Verified from Vercel:
+  // content-type text/html, meta aliyun_waf_aa/bb. Treat non-JSON as a failed
+  // provider so the chain moves on quietly.
+  const ctype = res.headers.get("content-type") ?? "";
+  if (!ctype.includes("json")) {
+    console.error("narration gateway returned non-JSON", { status: res.status, ctype });
+    return null;
+  }
+
+  const data = (await res.json()) as { content?: unknown };
   // Gateway wraps responses in a non-standard envelope; be defensive about shape.
   const content = data?.content;
   const text = Array.isArray(content)

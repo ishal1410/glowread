@@ -41,6 +41,21 @@ const nextConfig: NextConfig = {
     "@tensorflow/tfjs-backend-wasm",
     "sharp",
   ],
+  // The detector loads its model weights and the WASM binary by runtime path
+  // string, not by import, so Next's tracer cannot see them and the serverless
+  // bundle ships without them. It then fails open to the heuristic crop, which
+  // sends a photo with no face upstream and spends a paid unit on it. Force the
+  // assets into the trace for every route that can reach the detector.
+  outputFileTracingIncludes: {
+    "/api/analyze/**": [
+      "./node_modules/@vladmandic/face-api/model/tiny_face_detector_model*",
+      "./node_modules/@tensorflow/tfjs-backend-wasm/dist/*.wasm",
+    ],
+    "/api/analyze": [
+      "./node_modules/@vladmandic/face-api/model/tiny_face_detector_model*",
+      "./node_modules/@tensorflow/tfjs-backend-wasm/dist/*.wasm",
+    ],
+  },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
