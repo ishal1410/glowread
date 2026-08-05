@@ -2,9 +2,11 @@
 
 Snap a selfie, get an analysis of 11 skin concerns, a personalized AM/PM routine, and real products matched to your skin.
 
-Built for the DevNetwork [API + Cloud + AI] Hackathon 2026, Perfect Corp challenge.
+Next.js 16, React 19, TypeScript, Tailwind v4, on Vercel. Perfect Corp Skin Analysis supplies the scores; the planning is deterministic and the LLM only rewrites wording. 120 Vitest tests over the pure logic.
 
 Live at [glowread.vercel.app](https://glowread.vercel.app).
+
+Built for the DevNetwork [API + Cloud + AI] Hackathon 2026, Perfect Corp challenge.
 
 ---
 
@@ -17,7 +19,7 @@ npm run dev        # http://localhost:3000
 
 You do not need API keys to start. Without `PERFECTCORP_API_KEY` the app serves realistic sample data and labels it as such in the UI. With the key set, an uploaded selfie always runs the live analysis, and only an explicit "Try a demo" returns sample data, so a malformed request cannot pass off a fabricated reading as a real one. To go live, copy `.env.local.example` to `.env.local` and add your keys.
 
-Production build: `npm run build && npm run start`. Tests: `npm test` (Vitest, 103 tests over the pure logic: polarity, safety, matcher, response parsing, request guards).
+Production build: `npm run build && npm run start`. Tests: `npm test` (Vitest, 120 tests over the pure logic: polarity, safety, matcher, response parsing, request guards).
 
 ---
 
