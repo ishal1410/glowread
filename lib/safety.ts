@@ -26,6 +26,18 @@ export interface SafetyResult {
   warnings: string[];
 }
 
+// Substitution can collapse two criteria onto the same ingredient, which would
+// surface the same product twice in the grid.
+function dedupeByIngredient<T extends { ingredient: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  return items.filter((c) => {
+    const k = c.ingredient.toLowerCase();
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
 export function applySafety(plan: AgentPlan, profile?: UserProfile): SafetyResult {
   const warnings: string[] = [];
   const exclude = new Set<string>();
@@ -51,8 +63,13 @@ export function applySafety(plan: AgentPlan, profile?: UserProfile): SafetyResul
     return sub && !exclude.has(sub) ? sub : null;
   };
 
-  const fixSteps = (steps: typeof plan.routine.AM) =>
-    steps
+  // Two different excluded actives can share one safe substitute (retinol and
+  // salicylic acid both fall back to azelaic acid), which would otherwise put
+  // two steps of the SAME acid in one slot and tell a pregnant user to double
+  // up on it. Keep the first, drop the later duplicate.
+  const fixSteps = (steps: typeof plan.routine.AM) => {
+    const kept = new Set<string>();
+    return steps
       .map((s) => {
         const sub = substitute(s.ingredient);
         if (sub === null) return null;
@@ -60,17 +77,26 @@ export function applySafety(plan: AgentPlan, profile?: UserProfile): SafetyResul
           ? s
           : { ...s, ingredient: sub, why: `${s.why} (pregnancy-safe alternative).` };
       })
-      .filter((s): s is NonNullable<typeof s> => s !== null);
+      .filter((s): s is NonNullable<typeof s> => s !== null)
+      .filter((s) => {
+        const k = s.ingredient.toLowerCase();
+        if (kept.has(k)) return false;
+        kept.add(k);
+        return true;
+      });
+  };
 
   const safePlan: AgentPlan = {
     ...plan,
     routine: { AM: fixSteps(plan.routine.AM), PM: fixSteps(plan.routine.PM) },
-    product_criteria: plan.product_criteria
-      .map((c) => {
-        const sub = substitute(c.ingredient);
-        return sub === null ? null : { ...c, ingredient: sub };
-      })
-      .filter((c): c is NonNullable<typeof c> => c !== null),
+    product_criteria: dedupeByIngredient(
+      plan.product_criteria
+        .map((c) => {
+          const sub = substitute(c.ingredient);
+          return sub === null ? null : { ...c, ingredient: sub };
+        })
+        .filter((c): c is NonNullable<typeof c> => c !== null)
+    ),
   };
 
   // Detect conflicting actives within the same slot; warn + note to alternate.

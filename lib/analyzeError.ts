@@ -23,6 +23,17 @@ export function analyzeErrorResponse(err: unknown): AnalyzeErrorResponse {
     };
   }
 
+  // The bytes are not a decodable image. The magic-byte sniff only reads the
+  // first few bytes, so a truncated or renamed file gets past it and fails in
+  // the decoder. That is a client input error: answering 500 told the user to
+  // retry a file that can never work, and counted their mistake as our outage.
+  if (/unsupported image format|premature end of input|input file is missing|vipsjpeg|vipspng|bad extension|corrupt/i.test(msg)) {
+    return {
+      status: 400,
+      message: "That image couldn't be read. Please upload a valid JPEG, PNG, or WebP photo.",
+    };
+  }
+
   // The polled task is gone (expired, or a stale id from an old tab). Not a
   // server fault and not retryable against the same task — ask for a new scan.
   if (/poll http 404|task not found|invalid task/i.test(msg)) {

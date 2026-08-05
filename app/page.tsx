@@ -89,6 +89,13 @@ export default function Home() {
   async function runAnalyze(body: FormData | object) {
     setPhase("analyzing");
     setError("");
+    // Start every run with a clean cancel flag. A cancelled run can exit
+    // without passing through its own catch (the poll loop returns early on an
+    // aborted signal, and a cancel during the reveal hold has no in-flight
+    // request at all), leaving the flag stuck true. The next genuine failure
+    // then read it as "the user cancelled" and returned the user to the
+    // landing page with no error shown at all.
+    cancelledRef.current = false;
     const started = Date.now();
     // A real analysis can poll for ~110s. Hold the controller so the user can
     // actually stop waiting instead of being pinned to the loader.
@@ -124,7 +131,10 @@ export default function Home() {
       setPhase("error");
     } finally {
       clearTimeout(timeout);
-      abortRef.current = null;
+      // Only relinquish the slot if it is still ours. A run that was
+      // cancelled can finish its cleanup after a NEWER run has already claimed
+      // abortRef, and clearing it blindly left that newer run uncancellable.
+      if (abortRef.current === controller) abortRef.current = null;
     }
   }
 
@@ -180,6 +190,7 @@ export default function Home() {
   async function runUpload(file: File) {
     setPhase("analyzing");
     setError("");
+    cancelledRef.current = false; // see runAnalyze
     const started = Date.now();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -223,7 +234,10 @@ export default function Home() {
       setError(e instanceof Error ? e.message : "Something went wrong analyzing your skin. Please try again.");
       setPhase("error");
     } finally {
-      abortRef.current = null;
+      // Only relinquish the slot if it is still ours. A run that was
+      // cancelled can finish its cleanup after a NEWER run has already claimed
+      // abortRef, and clearing it blindly left that newer run uncancellable.
+      if (abortRef.current === controller) abortRef.current = null;
     }
   }
 

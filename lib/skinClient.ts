@@ -133,13 +133,34 @@ export type AnalysisState =
   | { state: "success"; scores: SkinScores }
   | { state: "error"; error: string };
 
+// Upstream states that say "ask again", not "give up". A 404 is absent: that
+// task is genuinely gone and polling it forever would hang the client.
+const RETRYABLE_POLL_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
+
 export async function pollRealAnalysis(taskId: string): Promise<AnalysisState> {
   const key = process.env.PERFECTCORP_API_KEY!;
-  const poll = await fetch(`${BASE}/s2s/v2.0/task/skin-analysis/${encodeURIComponent(taskId)}`, {
-    headers: { Authorization: `Bearer ${key}` },
-    signal: AbortSignal.timeout(8000),
-  });
-  if (!poll.ok) throw new Error(`poll http ${poll.status}`); // transient -> client retries
+  // A poll is one tick of a loop the browser drives, and the paid unit is
+  // already spent by the time we get here. A hiccup on a single tick must not
+  // end the analysis: the client treats any non-2xx as terminal and stops
+  // polling, so throwing here used to kill a run that was still succeeding
+  // upstream and force the user to spend a second unit.
+  let poll: Response;
+  try {
+    poll = await fetch(`${BASE}/s2s/v2.0/task/skin-analysis/${encodeURIComponent(taskId)}`, {
+      headers: { Authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(8000),
+    });
+  } catch (err) {
+    // Timeout or network blip. The task is unaffected; ask again next tick.
+    if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
+      return { state: "running" };
+    }
+    throw err;
+  }
+  if (!poll.ok) {
+    if (RETRYABLE_POLL_STATUS.has(poll.status)) return { state: "running" };
+    throw new Error(`poll http ${poll.status}`); // 404 and friends are terminal
+  }
 
   const state = readPollState(await poll.json());
   if (state.state === "running") return { state: "running" };

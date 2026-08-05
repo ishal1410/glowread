@@ -13,7 +13,7 @@ const labelForConcern = (k: string) =>
 // colour (green = doing well) plus an explicit marker on the metrics where a
 // HIGH number is the good outcome (firmness, hydration, radiance).
 function ConcernBar({ concern }: { concern: ConcernScore }) {
-  const row = concernRow(concern.key, concern.ui_score);
+  const row = concernRow(concern.key, concern.ui_score, concern.raw_score);
   return (
     <div>
       <div className="flex justify-between text-sm mb-1.5">

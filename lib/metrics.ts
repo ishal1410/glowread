@@ -47,12 +47,16 @@ export interface ConcernRow {
   higherIsBetter: boolean;
 }
 
-export function concernRow(key: string, score: number): ConcernRow {
+// `severityScore` is the field everything else ranks and colours on (raw_score).
+// Passing only the display score made the bar derive severity from ui_score
+// while the dial and the chips used raw_score, so one concern could render red
+// in the map and amber in the breakdown for the same reading.
+export function concernRow(key: string, score: number, severityScore: number = score): ConcernRow {
   const value = Math.min(100, Math.max(0, Math.round(score)));
   return {
     value,
     fill: value,
-    severity: severityOf(badness(key, score)),
+    severity: severityOf(badness(key, severityScore)),
     higherIsBetter: isAttribute(key),
   };
 }

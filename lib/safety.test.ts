@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { applySafety } from "./safety";
 import { buildPlanFromScores } from "./agent";
+import { buildAnalyzeResult } from "./analyzeResult";
 import type { SkinScores, ConcernScore, AgentPlan } from "./types";
 
 function cs(key: string, raw: number): ConcernScore {
@@ -55,5 +56,23 @@ describe("applySafety", () => {
     };
     const { warnings } = applySafety(plan, {});
     expect(warnings.some((w) => w.includes("retinol") && w.includes("glycolic acid"))).toBe(true);
+  });
+});
+
+describe("REGRESSION: pregnancy substitution must not duplicate an ingredient", () => {
+  it("collapses two actives that share one safe substitute into a single step", () => {
+    // retinol (wrinkle) and salicylic acid (acne) both map to azelaic acid.
+    const result = buildAnalyzeResult(
+      { concerns: [
+          { key: "wrinkle", label: "wrinkle", raw_score: 75, ui_score: 75 },
+          { key: "acne", label: "acne", raw_score: 55, ui_score: 55 },
+        ], skinAge: 30, healthScore: 70, source: "mock" },
+      { pregnant: true }
+    );
+    const pm = result.plan.routine.PM.map((s) => s.ingredient);
+    expect(pm).toEqual([...new Set(pm)]);
+
+    const crit = result.plan.product_criteria.map((c) => c.ingredient);
+    expect(crit).toEqual([...new Set(crit)]);
   });
 });

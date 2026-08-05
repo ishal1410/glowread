@@ -48,3 +48,17 @@ describe("analyzeErrorResponse", () => {
     expect(analyzeErrorResponse(new Error("invalid credentials for gateway")).status).toBe(500);
   });
 });
+
+describe("REGRESSION: an undecodable image is a client error, not a server fault", () => {
+  test("maps a sharp decode failure to 400", () => {
+    for (const msg of [
+      "Input buffer contains unsupported image format",
+      "VipsJpeg: Premature end of input file",
+      "Input file is missing or of an unsupported image format",
+    ]) {
+      const r = analyzeErrorResponse(new Error(msg));
+      expect(r.status).toBe(400);
+      expect(r.message).toMatch(/couldn't be read|could not be read/i);
+    }
+  });
+});

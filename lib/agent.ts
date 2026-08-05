@@ -62,7 +62,10 @@ export function buildPlanFromScores(scores: SkinScores): AgentPlan {
   for (const c of top) {
     const ings = CONCERN_INGREDIENTS[c.key] ?? [];
     for (const ing of ings.slice(0, 2)) {
-      const k = `${c.key}:${ing}`;
+      // Keyed on the ingredient alone. Keying on concern+ingredient let one
+      // ingredient shared by two top concerns (salicylic acid for acne and for
+      // pores) emit twice, which surfaces the same product card twice.
+      const k = ing;
       if (seen.has(k)) continue;
       seen.add(k);
       product_criteria.push({ concern: c.key, ingredient: ing, category: "Serum" });
@@ -74,13 +77,13 @@ export function buildPlanFromScores(scores: SkinScores): AgentPlan {
   // caffeine eye serum for their #2 concern that no step ever mentions. Take
   // the top TWO concerns' primary actives — two is the cap, because layering
   // three actives is an irritation risk, not a better routine.
-  const actives: { ingredient: string; label: string }[] = [];
-  for (const c of top.slice(0, 2)) {
+  const actives: { ingredient: string; label: string; rank: number }[] = [];
+  top.slice(0, 2).forEach((c, rank) => {
     const ingredient = (CONCERN_INGREDIENTS[c.key] ?? ["niacinamide"])[0];
     if (ingredient && !actives.some((a) => a.ingredient === ingredient)) {
-      actives.push({ ingredient, label: c.label.toLowerCase() });
+      actives.push({ ingredient, label: c.label.toLowerCase(), rank });
     }
-  }
+  });
 
   // Vitamin C belongs in the morning (antioxidant + SPF); everything else is a
   // PM treatment. Also brighten in the AM when any top concern calls for it.
@@ -98,10 +101,14 @@ export function buildPlanFromScores(scores: SkinScores): AgentPlan {
 
   const PM: RoutineStep[] = withOrder([
     { product_type: "Cleanser", ingredient: "glycerin", why: "Remove the day's buildup and sunscreen." },
-    ...pmActives.map((a, i) => ({
+    // Keyed on the concern's RANK, not its position in pmActives. When the #1
+    // concern's active is vitamin C it moves to the AM, and indexing by
+    // position promoted the #2 concern to "your top concern" — copy that
+    // contradicted the headline and the chips on the same screen.
+    ...pmActives.map((a) => ({
       product_type: PRODUCT_TYPE[a.ingredient] ?? "Treatment",
       ingredient: a.ingredient,
-      why: i === 0
+      why: a.rank === 0
         ? `Targets your top concern: ${a.label}.`
         : `Also treats ${a.label}. Introduce it on alternate nights so your skin adjusts.`,
     })),
@@ -171,7 +178,13 @@ export function sanitizeNarrationConcerns(raw: unknown): NarrationConcern[] {
     const r = item as Record<string, unknown>;
     const key = typeof r.concern === "string" ? r.concern : typeof r.key === "string" ? r.key : "";
     const severity = typeof r.severity === "string" ? r.severity : "";
-    if (!CONCERN_LABELS[key] || !SEVERITIES.includes(severity)) continue;
+    // hasOwnProperty, not truthiness: CONCERN_LABELS is a plain object, so
+    // "__proto__", "constructor", and "toString" all read back truthy from the
+    // prototype chain. They passed the guard, filled the three-slot cap, and
+    // pushed the caller's real concerns out.
+    const known = Object.prototype.hasOwnProperty.call(CONCERN_LABELS, key)
+      && typeof CONCERN_LABELS[key] === "string";
+    if (!known || !SEVERITIES.includes(severity)) continue;
     if (out.some((c) => c.key === key)) continue;
     out.push({ key, label: CONCERN_LABELS[key], severity: severity as Severity });
     if (out.length === 3) break;

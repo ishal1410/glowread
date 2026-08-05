@@ -103,3 +103,40 @@ describe("sanitizeNarrationConcerns", () => {
     expect(sanitizeNarrationConcerns([1, 2, 3])).toEqual([]);
   });
 });
+
+describe("REGRESSION: narration keys must not accept prototype members", () => {
+  it("rejects __proto__/constructor/toString and keeps the real concern", () => {
+    expect(
+      sanitizeNarrationConcerns([
+        { concern: "__proto__", severity: "high" },
+        { concern: "constructor", severity: "high" },
+        { concern: "toString", severity: "high" },
+        { concern: "acne", severity: "high" },
+      ])
+    ).toEqual([{ key: "acne", label: "Acne", severity: "high" }]);
+  });
+});
+
+describe("REGRESSION: routine copy must name the actual top concern", () => {
+  it("does not call the #2 concern 'your top concern' when #1's active moved to AM", () => {
+    // spot is #1 and its active is vitamin c, which is filtered out of PM.
+    const plan = buildPlanFromScores(scores([cs("spot", 80), cs("acne", 70), cs("pore", 30)]));
+    expect(plan.top_concerns[0].concern).toBe("spot");
+    const pm = plan.routine.PM.find((s) => s.ingredient === "salicylic acid");
+    expect(pm?.why).not.toMatch(/your top concern/i);
+  });
+
+  it("still calls it the top concern when the #1 concern's own active is in PM", () => {
+    const plan = buildPlanFromScores(scores([cs("acne", 80), cs("pore", 40)]));
+    const pm = plan.routine.PM.find((s) => s.ingredient === "salicylic acid");
+    expect(pm?.why).toMatch(/your top concern: acne/i);
+  });
+});
+
+describe("REGRESSION: product criteria must not repeat an ingredient", () => {
+  it("emits each ingredient at most once across all top concerns", () => {
+    const plan = buildPlanFromScores(scores([cs("acne", 80), cs("pore", 70), cs("texture", 60)]));
+    const ings = plan.product_criteria.map((c) => c.ingredient);
+    expect(ings).toEqual([...new Set(ings)]);
+  });
+});

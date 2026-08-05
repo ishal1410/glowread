@@ -47,3 +47,16 @@ describe("concernRow (what the breakdown bar renders)", () => {
     expect(concernRow("acne", -20).fill).toBe(0);
   });
 });
+
+describe("REGRESSION: severity must come from the raw score, not the display score", () => {
+  it("uses the severity score for colour while printing the display score", () => {
+    // mature_dry radiance: raw 45 (badness 55 -> high), ui 46 (badness 54 -> moderate).
+    const row = concernRow("radiance", 46, 45);
+    expect(row.value).toBe(46);
+    expect(row.severity).toBe("high");
+  });
+
+  it("falls back to the display score when no separate severity score is given", () => {
+    expect(concernRow("radiance", 46).severity).toBe("moderate");
+  });
+});
