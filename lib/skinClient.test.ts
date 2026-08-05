@@ -29,7 +29,19 @@ describe("pollRealAnalysis transient failures", () => {
   });
 
   it("still fails hard on 404, because that task is genuinely gone", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 404 }) as unknown as typeof fetch;
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 404, text: async () => "" }) as unknown as typeof fetch;
     await expect(pollRealAnalysis("task-1")).rejects.toThrow(/404/);
+  });
+
+  // Upstream reports an expired task as 400 InvalidTaskId. The body carries the
+  // only signal that distinguishes it from a real bad request, so it has to
+  // reach the error message or the mapper cannot classify it.
+  it("carries the upstream body into the error so an expired task is classifiable", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      text: async () => '{"error_code":"InvalidTaskId"}',
+    }) as unknown as typeof fetch;
+    await expect(pollRealAnalysis("task-1")).rejects.toThrow(/InvalidTaskId/);
   });
 });

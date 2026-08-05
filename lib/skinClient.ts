@@ -159,7 +159,10 @@ export async function pollRealAnalysis(taskId: string): Promise<AnalysisState> {
   }
   if (!poll.ok) {
     if (RETRYABLE_POLL_STATUS.has(poll.status)) return { state: "running" };
-    throw new Error(`poll http ${poll.status}`); // 404 and friends are terminal
+    // Carry the upstream body: an expired task comes back as 400 InvalidTaskId,
+    // and the status alone cannot be told apart from a genuine bad request.
+    const detail = await poll.text().catch(() => "");
+    throw new Error(`poll http ${poll.status} ${detail}`.trim());
   }
 
   const state = readPollState(await poll.json());

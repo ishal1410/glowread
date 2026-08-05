@@ -62,3 +62,13 @@ describe("REGRESSION: an undecodable image is a client error, not a server fault
     }
   });
 });
+
+describe("REGRESSION: an expired or unknown task is not a server fault", () => {
+  test("maps the upstream InvalidTaskId signal to 404", () => {
+    const r = analyzeErrorResponse(
+      new Error('poll http 400 {"status":400,"error":"This task ID doesn\'t exist, or the task has expired.","error_code":"InvalidTaskId"}')
+    );
+    expect(r.status).toBe(404);
+    expect(r.message).toMatch(/no longer available/i);
+  });
+});

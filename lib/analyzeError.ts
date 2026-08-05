@@ -36,7 +36,11 @@ export function analyzeErrorResponse(err: unknown): AnalyzeErrorResponse {
 
   // The polled task is gone (expired, or a stale id from an old tab). Not a
   // server fault and not retryable against the same task — ask for a new scan.
-  if (/poll http 404|task not found|invalid task/i.test(msg)) {
+  // Perfect Corp answers an expired or unknown task id with 400 InvalidTaskId,
+  // not 404, so matching only on 404 reported a stale browser tab as a server
+  // failure. Matched on the signal, not the status, so a genuine bad request
+  // from us still surfaces as a 500 we can notice.
+  if (/poll http 404|task not found|invalid task|invalidtaskid|task has expired/i.test(msg)) {
     return {
       status: 404,
       message: "That analysis is no longer available. Please run a new scan.",
