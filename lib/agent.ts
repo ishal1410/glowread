@@ -369,7 +369,10 @@ async function narrateWithAgentRouter(concerns: NarrationConcern[], apiKey: stri
     // lingering after the race has already resolved.
     signal: AbortSignal.timeout(28000),
   });
-  if (!res.ok) return null;
+  if (!res.ok) {
+    console.error("agentrouter narration failed", { status: res.status, model });
+    return null;
+  }
 
   // The gateway sits behind an Aliyun WAF that answers datacenter IPs with an
   // HTML anti-bot interstitial carrying a 200 status, so a bare res.json() here
@@ -401,21 +404,40 @@ async function narrateWithAgentRouter(concerns: NarrationConcern[], apiKey: stri
 // so the output schema can never break.
 async function narrateWithGemini(concerns: NarrationConcern[], apiKey: string): Promise<Narration | null> {
   const prompt = narrationPrompt(concerns);
+  // gemini-2.0-flash and the 2.5 line return 429 limit:0 / 404 "no longer
+  // available to new users" on keys issued now; the floating alias is the one
+  // a fresh free-tier key can actually call. Pinning a version would break the
+  // next time Google retires one, so track the alias and allow an override.
+  const model = process.env.GEMINI_MODEL || "gemini-flash-latest";
 
   const res = await fetch(
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
     {
       method: "POST",
       // Key in a header, never the URL (query strings leak into proxy/access logs).
       headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { responseMimeType: "application/json" },
+        generationConfig: {
+          responseMimeType: "application/json",
+          // Rewriting three sentences in a warmer voice needs no deliberation,
+          // and the default spends most of the call on it: measured 5.0s vs
+          // 2.1s for identical output.
+          thinkingConfig: { thinkingLevel: "low" },
+        },
       }),
-      signal: AbortSignal.timeout(15000), // kept under NARRATION_BUDGET_MS
+      // Typical call is 2-5s, but a measured outlier hit 15s and was cut off
+      // for nothing — the 30s budget had room to spare. Kept under it.
+      signal: AbortSignal.timeout(25000),
     }
   );
-  if (!res.ok) return null;
+  // Quota exhaustion is the likeliest production failure and it arrives here,
+  // not as a thrown error — without this the only symptom is deterministic
+  // wording with a silent 200 in the logs.
+  if (!res.ok) {
+    console.error("gemini narration failed", { status: res.status, model });
+    return null;
+  }
   const data = await res.json();
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
   if (typeof text !== "string") return null;
