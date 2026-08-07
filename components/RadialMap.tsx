@@ -62,7 +62,7 @@ export default function RadialMap({ concerns, healthScore }: { concerns: Concern
   const healthColor = healthScore >= 70 ? "var(--good)" : healthScore >= 50 ? "var(--mid)" : "var(--high)";
 
   return (
-    <div className="relative" style={{ width: SIZE, maxWidth: "100%", aspectRatio: "1 / 1" }}>
+    <div className="relative" style={{ width: SIZE, maxWidth: "100%", aspectRatio: "1 / 1", containerType: "inline-size" }}>
       <svg width="100%" height="100%" viewBox={`0 0 ${SIZE} ${SIZE}`} role="img"
         aria-label={`Skin health ${healthScore} of 100 with ${concerns.length} measured concerns`}>
         <defs>
@@ -105,10 +105,14 @@ export default function RadialMap({ concerns, healthScore }: { concerns: Concern
         <circle cx={C} cy={C} r={R_IN - 4} fill="none" stroke={healthColor} strokeOpacity="0.5" strokeWidth="1.5" />
       </svg>
 
-      {/* Center readout */}
+      {/* Center readout. The dial is fluid below SIZE (maxWidth 100%) but this
+          text sits outside the viewBox, so fixed rem sizes stay put while the
+          inner ring shrinks around them — at 320px the label used to spill onto
+          the wedges. Sizing in cqw keeps the readout at the same fraction of the
+          dial it has at full size: 3.2rem/340 and 0.7rem/340 of the width. */}
       <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-        <span className="display" style={{ fontSize: "3.2rem", color: healthColor, lineHeight: 1 }}>{count}</span>
-        <span className="eyebrow" style={{ marginTop: 4 }}>skin health</span>
+        <span className="display" style={{ fontSize: "15.06cqw", color: healthColor, lineHeight: 1 }}>{count}</span>
+        <span className="eyebrow" style={{ fontSize: "3.29cqw", marginTop: "1.18cqw" }}>skin health</span>
       </div>
     </div>
   );
