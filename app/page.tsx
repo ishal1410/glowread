@@ -58,12 +58,22 @@ export default function Home() {
   const revealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const cancelledRef = useRef(false);
+  const revealRef = useRef<HTMLElement>(null);
   useEffect(() => () => { if (revealTimer.current) clearTimeout(revealTimer.current); }, []);
 
   // Theme toggle
   const [theme, setTheme] = useState<"light" | "dark">("light");
+  // localStorage THROWS when storage is blocked (Safari private browsing, an
+  // embedded context with third-party cookies off, some enterprise policies).
+  // Unguarded, that throw happens inside a mount effect, propagates past a
+  // non-existent error boundary, and unmounts the app to a blank screen before
+  // the user ever uploads. The bootstrap script in layout.tsx already wraps the
+  // identical access; this copy did not.
   useEffect(() => {
-    const stored = (typeof window !== "undefined" && localStorage.getItem("theme")) as "light" | "dark" | null;
+    let stored: "light" | "dark" | null = null;
+    try {
+      stored = (typeof window !== "undefined" && localStorage.getItem("theme")) as "light" | "dark" | null;
+    } catch { /* storage unavailable — fall back to the system preference */ }
     const initial = stored ?? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
     setTheme(initial);
     document.documentElement.setAttribute("data-theme", initial);
@@ -72,8 +82,15 @@ export default function Home() {
     const next = theme === "dark" ? "light" : "dark";
     setTheme(next);
     document.documentElement.setAttribute("data-theme", next);
-    localStorage.setItem("theme", next);
+    try {
+      localStorage.setItem("theme", next);
+    } catch { /* the toggle still works this session; it just won't persist */ }
   };
+
+  // Move focus to the reveal when it arrives (see the section's tabIndex).
+  useEffect(() => {
+    if (phase === "done") revealRef.current?.focus();
+  }, [phase]);
 
   // Advance the loader messages, then hold on the last one.
   useEffect(() => {
@@ -101,7 +118,14 @@ export default function Home() {
     // actually stop waiting instead of being pinned to the loader.
     const controller = new AbortController();
     abortRef.current = controller;
-    const timeout = setTimeout(() => controller.abort(), 150000);
+    // Abort WITH a reason. A bare abort() rejects with DOMException("signal is
+    // aborted without reason"), which passes `instanceof Error` and was printed
+    // verbatim as the entire error screen — the worst possible string to have
+    // on a projector.
+    const timeout = setTimeout(
+      () => controller.abort(new Error("That took longer than expected. Please try again.")),
+      150000
+    );
     try {
       const res = await fetch("/api/analyze", {
         method: "POST",
@@ -210,18 +234,38 @@ export default function Home() {
 
       // Poll until it lands. Generous ceiling — a live HD analysis has been seen
       // taking well over a minute, and the user can Cancel at any point.
+      // The server maps retryable STATUSES to "still running", but that only
+      // covers responses that arrive. A transport failure (one dropped TCP
+      // connection on conference wifi) rejects with TypeError and used to end
+      // a run that was still succeeding upstream, burning the paid unit and
+      // sending the user back to re-upload. Tolerate a few consecutive
+      // failures, and give each poll its own timeout so a request that is
+      // accepted and never answered cannot park the loop on `await` forever —
+      // the outer deadline is only evaluated between iterations.
+      const MAX_CONSECUTIVE_POLL_FAILURES = 5;
+      const POLL_TIMEOUT_MS = 15000;
+      let consecutiveFailures = 0;
       const deadline = Date.now() + 4 * 60 * 1000;
       while (Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 2000));
         if (controller.signal.aborted) return;
-        const res = await fetch("/api/analyze/status", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          signal: controller.signal,
-          body: JSON.stringify({ taskId, profile }),
-        });
+        let res: Response;
+        try {
+          res = await fetch("/api/analyze/status", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(POLL_TIMEOUT_MS)]),
+            body: JSON.stringify({ taskId, profile }),
+          });
+        } catch (pollErr) {
+          // A user cancel aborts the shared controller — that is terminal.
+          if (controller.signal.aborted || cancelledRef.current) return;
+          if (++consecutiveFailures >= MAX_CONSECUTIVE_POLL_FAILURES) throw pollErr;
+          continue;
+        }
         const data = await res.json().catch(() => null);
         if (!res.ok) throw new Error(data?.error || "Something went wrong analyzing your skin. Please try again.");
+        consecutiveFailures = 0;
         if (data?.state === "success") return finishAnalyze(data.result, started);
       }
       throw new Error("That took longer than expected. Please try again.");
@@ -243,6 +287,15 @@ export default function Home() {
 
   // Hold the loader on screen briefly so the reveal doesn't flash past.
   function finishAnalyze(data: AnalyzeResult, started: number) {
+    // A "success" that carries no usable result used to set phase="done" with
+    // result=null. The render gate below is `phase === "done" && result`, so
+    // NOTHING rendered under the header — no reveal, no error, no way back
+    // short of a reload — and narrate() then dereferenced data.plan.
+    if (!data?.plan || !data?.scores) {
+      setError("Something went wrong analyzing your skin. Please try again.");
+      setPhase("error");
+      return;
+    }
     const wait = Math.max(0, 2200 - (Date.now() - started));
     if (revealTimer.current) clearTimeout(revealTimer.current);
     revealTimer.current = setTimeout(() => {
@@ -399,7 +452,12 @@ export default function Home() {
             <div className="absolute inset-0 rounded-full" style={{ boxShadow: "inset 0 0 40px -10px var(--glow)" }} />
           </div>
           <div className="eyebrow" style={{ color: "var(--violet-2)" }}>analyzing</div>
-          <div className="text-lg font-medium mt-2">{LOADER_STEPS[loaderStep]}</div>
+          {/* Announced, not just drawn: the button that started this was
+              unmounted by the same state update, so without a live region a
+              screen-reader user gets no signal that anything is happening. */}
+          <div className="text-lg font-medium mt-2" role="status" aria-live="polite">
+            {LOADER_STEPS[loaderStep]}
+          </div>
           <div className="mt-5 flex gap-1.5 justify-center">
             {LOADER_STEPS.map((_, i) => (
               <div key={i} className="h-1 rounded-full" style={{
@@ -413,7 +471,10 @@ export default function Home() {
       )}
 
       {phase === "done" && result && (
-        <section>
+        // Focus lands here when the reveal mounts. Without it, focus falls back
+        // to <body> (the trigger button was unmounted), so the next Tab restarts
+        // at the top of the page and nothing announces that the result arrived.
+        <section ref={revealRef} tabIndex={-1} style={{ outline: "none" }}>
           <Reveal result={result} />
           <div className="text-center mt-10">
             <button className="btn-ghost" onClick={reset}>Analyze again</button>
@@ -429,7 +490,7 @@ export default function Home() {
 
       {phase === "error" && (
         <section className="text-center py-16">
-          <p className="text-lg mb-4">{error}</p>
+          <p className="text-lg mb-4" role="alert">{error}</p>
           <button className="btn-primary" onClick={reset}>Try again</button>
         </section>
       )}
