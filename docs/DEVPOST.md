@@ -6,7 +6,7 @@ Written in first person singular for a solo entry. Swap to "we" if anyone joins.
 
 ## Elevator pitch (200 char limit)
 
-Snap a selfie, get a real dermatological-grade read on 11 skin concerns, and walk away with an AM/PM routine built from actual products you can buy.
+Snap a selfie. Perfect Corp's Skin Analysis API measures 11 concerns on your actual face, and GlowRead turns that reading into an AM/PM routine built from real products you can buy.
 
 ---
 
@@ -38,7 +38,7 @@ The pipeline is split so nothing outlives a serverless time cap. `/api/analyze/s
 
 Face detection runs locally on face-api with a TensorFlow.js WASM backend before anything is uploaded. A photo with no face in it is rejected in about a second, on my machine, for free.
 
-103 Vitest tests cover the parsing, the polarity math, the safety rules, the matcher, and the request guards. Everything security-relevant lives in pure functions so it can be tested instead of buried in a route handler.
+120 Vitest tests cover the parsing, the polarity math, the safety rules, the matcher, and the request guards. Everything security-relevant lives in pure functions so it can be tested instead of buried in a route handler.
 
 ## Challenges I ran into
 
