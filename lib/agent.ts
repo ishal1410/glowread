@@ -306,10 +306,14 @@ function parseNarrationJson(text: string): unknown {
 // is built from OUR vocabulary (see sanitizeNarrationConcerns), never from
 // client-supplied text.
 function narrationPrompt(concerns: NarrationConcern[]): string {
-  return `You are a warm, encouraging cosmetic skincare coach (NOT a doctor; never diagnose).
-Given these top concerns, rewrite ONLY the "headline" and each concern "explanation" in plain, friendly language.
-Keep the headline under 140 characters and each explanation under 240 characters — concise and warm.
-Do NOT mention numeric scores. Return strict JSON: {"headline": string, "explanations": {"<concernKey>": string}}.
+  return `You are a precise, calm cosmetic skincare coach (NOT a doctor; never diagnose).
+Given these top concerns, rewrite ONLY the "headline" and each concern "explanation".
+Voice: clear, specific, grounded — the tone of a good clinician, not a brand campaign.
+Every sentence must say something concrete about THIS reading or what to do about it.
+Do NOT use exclamation marks, cheerleading, or hype ("glow up", "shine", "journey",
+"together", "a little love"). Do NOT open with "Let's". Do NOT mention numeric scores.
+Keep the headline under 140 characters and each explanation under 240 characters.
+Return strict JSON: {"headline": string, "explanations": {"<concernKey>": string}}.
 Top concerns: ${JSON.stringify(concerns)}`;
 }
 
@@ -331,7 +335,7 @@ async function narrateWithClaude(concerns: NarrationConcern[], apiKey: string): 
       // the call stays fast (Vercel route budget) and cheap.
       output_config: { effort: "low" },
       system:
-        "You are a warm cosmetic skincare coach. Respond with strict JSON only — no preamble, no markdown fences.",
+        "You are a precise, calm cosmetic skincare coach. Respond with strict JSON only — no preamble, no markdown fences.",
       messages: [{ role: "user", content: narrationPrompt(concerns) }],
     },
     { timeout: 20000 } // kept under NARRATION_BUDGET_MS
@@ -374,7 +378,7 @@ async function narrateWithAgentRouter(concerns: NarrationConcern[], apiKey: stri
       // is a trivial rewrite, not a reasoning task.
       output_config: { effort: "low" },
       system:
-        "You are a warm cosmetic skincare coach. Respond with strict JSON only — no preamble, no markdown fences.",
+        "You are a precise, calm cosmetic skincare coach. Respond with strict JSON only — no preamble, no markdown fences.",
       messages: [{ role: "user", content: narrationPrompt(concerns) }],
     }),
     // Bounded by NARRATION_BUDGET_MS overall; keep the socket timeout just

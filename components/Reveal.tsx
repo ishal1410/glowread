@@ -102,11 +102,14 @@ export default function Reveal({ result }: { result: AnalyzeResult }) {
             {scores.source === "mock" ? "demo analysis" : "perfect corp analysis"} · est. skin age {scores.skinAge}
           </div>
           <h2 className="display" style={{ fontSize: "2.4rem" }}>{plan.headline}</h2>
+          {/* "· low" alone was ambiguous on the four higher-is-better metrics:
+              "Hydration · low" reads as low hydration when it means this is a
+              low-priority concern. The noun fixes it for every metric at once. */}
           <div className="flex flex-wrap gap-2 mt-5 justify-center md:justify-start">
             {plan.top_concerns.map((c) => (
               <span key={c.concern} className="chip"
                 style={{ borderColor: SEV_COLOR[c.severity], color: SEV_COLOR[c.severity] }}>
-                {c.label} · {c.severity}
+                {c.label} · {c.severity} concern
               </span>
             ))}
           </div>
@@ -119,7 +122,7 @@ export default function Reveal({ result }: { result: AnalyzeResult }) {
           {plan.top_concerns.map((c, i) => (
             <div key={c.concern} className="card p-6 rise">
               <div className="mono text-xs mb-3" style={{ color: SEV_COLOR[c.severity] }}>
-                {String(i + 1).padStart(2, "0")} / {c.severity}
+                {String(i + 1).padStart(2, "0")} / {c.severity} concern
               </div>
               <h3 className="font-semibold mb-1">{c.label}</h3>
               <p className="text-sm" style={{ color: "var(--muted)" }}>{c.explanation}</p>
