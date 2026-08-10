@@ -41,7 +41,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Image too large (max 10MB)." }, { status: 413 });
     }
 
-    const form = await req.formData();
+    // The content-type check above is a substring test, so a header with no
+    // boundary, a boundary that doesn't match the body, and a mobile upload
+    // truncated mid-part all reach here and reject with "Failed to parse body
+    // as FormData." That matches nothing in analyzeErrorResponse and became a
+    // 500 — telling the user to retry a request that can never succeed, and
+    // counting their malformed upload as our outage.
+    let form: FormData;
+    try {
+      form = await req.formData();
+    } catch {
+      return NextResponse.json({ error: "That upload was incomplete. Please try again." }, { status: 400 });
+    }
     const file = form.get("image");
     if (!file || typeof file === "string") {
       return NextResponse.json({ error: "Please upload an image file." }, { status: 400 });

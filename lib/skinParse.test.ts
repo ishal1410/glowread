@@ -10,8 +10,13 @@ import {
   pollUntilDone,
   faceFillCrop,
   expandFaceBox,
+  detectorScale,
+  rescaleBox,
+  SHARP_INPUT,
+  MAX_INPUT_PIXELS,
   HD_CONCERNS,
 } from "./skinParse";
+import sharp from "sharp";
 import { rankByBadness } from "./metrics";
 
 // REAL success payload shape captured live from yce-api-01.makeupar.com on
@@ -324,6 +329,66 @@ describe("expandFaceBox", () => {
     expect(b.height).toBeLessThanOrEqual(512);
     expect(b.left + b.width).toBeLessThanOrEqual(512);
   });
+});
+
+describe("detectorScale / rescaleBox", () => {
+  test("passes a small image through untouched", () => {
+    expect(detectorScale(800, 600)).toBe(1);
+    const box = { x: 10, y: 20, width: 30, height: 40 };
+    expect(rescaleBox(box, 1)).toEqual(box);
+  });
+
+  test("shrinks the long side to the cap", () => {
+    expect(detectorScale(4000, 3000, 1000)).toBeCloseTo(0.25);
+    expect(detectorScale(3000, 4000, 1000)).toBeCloseTo(0.25);
+  });
+
+  test("degenerate dimensions do not divide by zero", () => {
+    expect(detectorScale(0, 0)).toBe(1);
+  });
+
+  // A box found on the downscaled image has to land back on the original, or
+  // expandFaceBox would crop a quarter-size region in the top-left corner.
+  test("round-trips a detected box back to original coordinates", () => {
+    const scale = detectorScale(4000, 3000, 1000);
+    const onSmall = { x: 250, y: 125, width: 100, height: 100 };
+    expect(rescaleBox(onSmall, scale)).toEqual({ x: 1000, y: 500, width: 400, height: 400 });
+  });
+});
+
+describe("decode limits", () => {
+  test("MAX_INPUT_PIXELS is well under what OOMs a serverless instance", () => {
+    expect(MAX_INPUT_PIXELS).toBeLessThan(0x3fff ** 2); // the libvips default
+    expect(MAX_INPUT_PIXELS).toBeGreaterThan(12_000_000); // a real 12MP phone photo still decodes
+  });
+
+  // The regression that matters: a tiny, highly compressible PNG that decodes to
+  // an enormous raw buffer. Without SHARP_INPUT this resolves and allocates
+  // ~768MB; with it, sharp rejects before allocating.
+  test("rejects a decompression-bomb PNG instead of decoding it", async () => {
+    const side = 16000;
+    const bomb = await sharp({
+      create: { width: side, height: side, channels: 3, background: { r: 7, g: 7, b: 7 } },
+    })
+      .png({ compressionLevel: 9 })
+      .toBuffer({ resolveWithObject: false });
+
+    expect(bomb.length).toBeLessThan(2_000_000); // small on the wire...
+    expect(side * side).toBeGreaterThan(MAX_INPUT_PIXELS); // ...huge once decoded
+
+    await expect(sharp(bomb, SHARP_INPUT).metadata()).rejects.toThrow(/pixel/i);
+  }, 60_000);
+
+  test("still decodes an ordinary photo-sized image", async () => {
+    const ok = await sharp({
+      create: { width: 3000, height: 4000, channels: 3, background: { r: 200, g: 180, b: 170 } },
+    })
+      .jpeg()
+      .toBuffer();
+    const meta = await sharp(ok, SHARP_INPUT).metadata();
+    expect(meta.width).toBe(3000);
+    expect(meta.height).toBe(4000);
+  }, 60_000);
 });
 
 describe("assertUsableScores", () => {

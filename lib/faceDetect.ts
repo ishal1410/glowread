@@ -14,6 +14,7 @@ import * as wasm from "@tensorflow/tfjs-backend-wasm";
 // @ts-ignore - dist path has a sibling .d.ts but TS can't always resolve it
 import * as faceapi from "@vladmandic/face-api/dist/face-api.node-wasm.js";
 import sharp from "sharp";
+import { SHARP_INPUT, DETECTOR_MAX_SIDE, detectorScale, rescaleBox } from "./skinParse";
 
 export interface FaceBox { x: number; y: number; width: number; height: number; }
 
@@ -37,7 +38,17 @@ function init(): Promise<void> {
 // back to a heuristic crop rather than rejecting a possibly-valid photo).
 export async function detectFace(buffer: Buffer): Promise<FaceBox | null> {
   await init();
-  const { data, info } = await sharp(buffer).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  // Downscale BEFORE .raw(). tinyFaceDetector resizes its input to 416px
+  // internally, so a full-size decode buys no accuracy and costs the whole
+  // intermediate: a 16000x16000 input produced a 768MB raw buffer and a ~3GB
+  // int32 tensor on top. Cap the long side, detect, then map the box back.
+  const meta = await sharp(buffer, SHARP_INPUT).metadata();
+  const scale = detectorScale(meta.width ?? 0, meta.height ?? 0, DETECTOR_MAX_SIDE);
+  let prepared = sharp(buffer, SHARP_INPUT).removeAlpha();
+  if (scale !== 1) {
+    prepared = prepared.resize(Math.round((meta.width ?? 0) * scale), Math.round((meta.height ?? 0) * scale));
+  }
+  const { data, info } = await prepared.raw().toBuffer({ resolveWithObject: true });
   const t = tf.tensor3d(new Uint8Array(data), [info.height, info.width, 3]);
   try {
     // face-api bundles its own tfjs-core types; the tensor type won't line up
@@ -47,8 +58,9 @@ export async function detectFace(buffer: Buffer): Promise<FaceBox | null> {
       new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.4 })
     );
     if (!det) return null;
-    const b = det.box;
-    return { x: b.x, y: b.y, width: b.width, height: b.height };
+    // Back to ORIGINAL image coordinates — the caller crops the full-size image
+    // with this box, so returning downscaled coords would crop the wrong region.
+    return rescaleBox(det.box, scale);
   } finally {
     t.dispose();
   }

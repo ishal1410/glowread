@@ -239,6 +239,43 @@ export function expandFaceBox(
   return { left, top, width: side, height: side };
 }
 
+// Ceiling on how many pixels we will let a decoder allocate for an upload.
+// libvips defaults to 0x3FFF^2 = 268 megapixels, and the only inbound bound is a
+// 10MB BYTE cap — but bytes are not pixels. A 249KB uniform 16000x16000 PNG
+// decodes to a 768MB raw buffer and, once handed to tf.tensor3d as a Uint8Array
+// (inferred int32, 4 bytes/element), a further ~3GB. Measured peak RSS for the
+// decode alone was 858MB, against a 1-2GB serverless instance. 40MP is far above
+// any real phone camera (a 48MP sensor still saves ~12MP images) and far below
+// the amount that can OOM the box.
+export const MAX_INPUT_PIXELS = 40_000_000;
+export const SHARP_INPUT = { limitInputPixels: MAX_INPUT_PIXELS } as const;
+
+// The detector resizes its input to 416px internally, so handing it a full-size
+// image only inflates the intermediate raw buffer — the information reaching the
+// model is identical. Downscale so the long side is at most DETECTOR_MAX_SIDE
+// first, then map the resulting box back to original coordinates. Only ever
+// shrinks: a small image is passed through at scale 1.
+export const DETECTOR_MAX_SIDE = 1024;
+export function detectorScale(w: number, h: number, maxSide: number = DETECTOR_MAX_SIDE): number {
+  const longSide = Math.max(w, h);
+  if (!(longSide > 0) || longSide <= maxSide) return 1;
+  return maxSide / longSide;
+}
+
+// Map a box detected on a downscaled image back onto the original.
+export function rescaleBox<T extends { x: number; y: number; width: number; height: number }>(
+  box: T,
+  scale: number
+): { x: number; y: number; width: number; height: number } {
+  if (scale === 1) return { x: box.x, y: box.y, width: box.width, height: box.height };
+  return {
+    x: box.x / scale,
+    y: box.y / scale,
+    width: box.width / scale,
+    height: box.height / scale,
+  };
+}
+
 export type PollState =
   | { state: "running" }
   | { state: "success"; results: unknown }

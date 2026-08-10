@@ -34,6 +34,17 @@ export function analyzeErrorResponse(err: unknown): AnalyzeErrorResponse {
     };
   }
 
+  // Refused before decoding: the file is small on the wire but enormous in
+  // pixels (a decompression bomb, or simply a wildly oversized scan). Sharp
+  // rejects with "Input image exceeds pixel limit". Also a client input error —
+  // without this it fell through to a 500 and read as our outage.
+  if (/exceeds pixel limit|pixel limit/i.test(msg)) {
+    return {
+      status: 400,
+      message: "That image is too large to process. Please upload a normal photo under 40 megapixels.",
+    };
+  }
+
   // The polled task is gone (expired, or a stale id from an old tab). Not a
   // server fault and not retryable against the same task — ask for a new scan.
   // Perfect Corp answers an expired or unknown task id with 400 InvalidTaskId,

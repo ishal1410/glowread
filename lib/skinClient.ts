@@ -4,7 +4,7 @@
 import sharp from "sharp";
 import type { SkinScores } from "./types";
 import { getMockScores, MOCK_VARIANTS } from "./mockSkin";
-import { parseInitResponse, buildTaskBody, parseTaskId, readPollState, parseSkinAnalysis, assertUsableScores, faceFillCrop, expandFaceBox, HD_CONCERNS } from "./skinParse";
+import { parseInitResponse, buildTaskBody, parseTaskId, readPollState, parseSkinAnalysis, assertUsableScores, faceFillCrop, expandFaceBox, SHARP_INPUT, HD_CONCERNS } from "./skinParse";
 import { detectFace } from "./faceDetect";
 
 // Thrown when local face detection runs and finds no face — the caller maps this
@@ -39,8 +39,10 @@ const FACE_FILL_SHORT = 1500;
 const MAX_LONG = 4096;
 async function normalizeImage(imageBuffer: Buffer): Promise<{ buffer: Buffer; mime: string }> {
   // Bake in EXIF orientation first so crop coordinates are on the upright image.
-  const oriented = await sharp(imageBuffer).rotate().toBuffer();
-  const meta = await sharp(oriented).metadata();
+  // SHARP_INPUT caps decoded pixels: the inbound guard bounds BYTES, and a
+  // 776KB PNG can still decode to 16000x16000 (768MB raw) and OOM the instance.
+  const oriented = await sharp(imageBuffer, SHARP_INPUT).rotate().toBuffer();
+  const meta = await sharp(oriented, SHARP_INPUT).metadata();
   const w = meta.width ?? 0;
   const h = meta.height ?? 0;
 
@@ -56,7 +58,7 @@ async function normalizeImage(imageBuffer: Buffer): Promise<{ buffer: Buffer; mi
   }
   if (face === null) throw new NoFaceError();
 
-  let pipeline = sharp(oriented);
+  let pipeline = sharp(oriented, SHARP_INPUT);
   let cw = w;
   let ch = h;
   if (w > 0 && h > 0) {
@@ -99,7 +101,11 @@ export async function startRealAnalysis(imageBuffer: Buffer): Promise<string> {
     body: JSON.stringify({ files: [{ content_type: mime, file_name: "selfie", file_size: img.length }] }),
     signal: AbortSignal.timeout(10000),
   });
-  if (!initRes.ok) throw new Error(`file init failed: ${initRes.status}`);
+  // Carry the body, as task-create does below. analyzeErrorResponse classifies
+  // on message TEXT, so a status number alone matches nothing and every step-1
+  // failure — including a credit state, if the upstream ever reports it here
+  // rather than at task creation — could only ever surface as a generic 500.
+  if (!initRes.ok) throw new Error(`file init failed: ${initRes.status} ${await initRes.text().catch(() => "")}`.trim());
   const { fileId, uploadUrl, uploadHeaders } = parseInitResponse(await initRes.json());
 
   // 2) PUT the image to the presigned URL, honoring the init-prescribed headers
@@ -152,7 +158,12 @@ export async function pollRealAnalysis(taskId: string): Promise<AnalysisState> {
     });
   } catch (err) {
     // Timeout or network blip. The task is unaffected; ask again next tick.
-    if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError")) {
+    // A dropped TCP connection, a DNS failure and a mid-flight socket reset all
+    // reject as `TypeError: fetch failed` (cause.code ECONNREFUSED/ENOTFOUND),
+    // NOT as TimeoutError — so matching only the abort names rethrew exactly the
+    // transient case this guard exists to absorb, and the client's terminal
+    // handling then discarded a run whose paid unit was already spent.
+    if (err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError" || err.name === "TypeError")) {
       return { state: "running" };
     }
     throw err;
@@ -165,7 +176,18 @@ export async function pollRealAnalysis(taskId: string): Promise<AnalysisState> {
     throw new Error(`poll http ${poll.status} ${detail}`.trim());
   }
 
-  const state = readPollState(await poll.json());
+  // A 200 carrying a non-JSON body is a real observed failure mode on this
+  // stack (agent.ts documents an anti-bot interstitial answering datacenter IPs
+  // with HTML at status 200). A bare .json() there throws SyntaxError, which is
+  // classified as a 500 and ends the run. Treat an unparseable tick as
+  // transient — the task upstream is unaffected.
+  let payload: unknown;
+  try {
+    payload = await poll.json();
+  } catch {
+    return { state: "running" };
+  }
+  const state = readPollState(payload);
   if (state.state === "running") return { state: "running" };
   if (state.state === "error") return { state: "error", error: state.error };
   return { state: "success", scores: assertUsableScores(parseSkinAnalysis(state.results)) };
