@@ -33,6 +33,12 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# demo video capture: raw webm, ffmpeg segment intermediates and the rendered
+# mp4. Regenerate with scripts/record-demo.mjs + scripts/build-demo.mjs.
+/demo-capture
+# local, licence-restricted demo stills (stock portrait) — not redistributable
+/demo-assets
+
 # vercel
 .vercel
 

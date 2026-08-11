@@ -38,7 +38,7 @@ The pipeline is split so nothing outlives a serverless time cap. `/api/analyze/s
 
 Face detection runs locally on face-api with a TensorFlow.js WASM backend before anything is uploaded. A photo with no face in it is rejected in about a second, on my machine, for free.
 
-120 Vitest tests cover the parsing, the polarity math, the safety rules, the matcher, and the request guards. Everything security-relevant lives in pure functions so it can be tested instead of buried in a route handler.
+127 Vitest tests cover the parsing, the polarity math, the safety rules, the matcher, and the request guards. Everything security-relevant lives in pure functions so it can be tested instead of buried in a route handler.
 
 ## Challenges I ran into
 
