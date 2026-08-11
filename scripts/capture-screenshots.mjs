@@ -36,10 +36,14 @@ async function analyse(page, file) {
   await chooser.setFiles(file);
 }
 
-/** Centre a section in the viewport, let motion settle, then shoot. */
+/** Centre a section in the viewport, let motion settle, then shoot.
+ *
+ * Forces block:"center" rather than scrollIntoViewIfNeeded: "if needed" is a
+ * no-op when the target is already partly visible, which silently produced a
+ * breakdown shot identical to the reveal shot (SSIM 0.9992). */
 async function shot(page, name, locator) {
   if (locator) {
-    await locator.scrollIntoViewIfNeeded().catch(() => {});
+    await locator.evaluate((el) => el.scrollIntoView({ block: "center", behavior: "instant" })).catch(() => {});
     await wait(900);
   }
   const file = join(OUT, `${name}.png`);
@@ -62,7 +66,7 @@ await page.goto(BASE, { waitUntil: "networkidle" });
 await page.getByRole("button", { name: /Analyze my selfie/i }).waitFor();
 const again = page.getByRole("button", { name: /Analyze again/i });
 
-if (!ONLY) {
+if (!ONLY || ONLY === "baseline") {
   // 01 — the landing page (free)
   await wait(1200);
   await shot(page, "01-landing");
@@ -76,11 +80,19 @@ if (!ONLY) {
   await shot(page, "03-breakdown", page.getByText(/Full skin breakdown/i).first());
   await shot(page, "04-products", page.getByText(/Matched to your skin/i).first());
 
+  if (ONLY === "baseline") {
+    await context.close();
+    await browser.close();
+    console.log(`\ndone -> ${OUT}`);
+    process.exit(0);
+  }
+
   await again.click();
   await page.getByRole("button", { name: /Analyze my selfie/i }).waitFor();
 }
 
 // 05 — the pregnancy safety gate (20 units)
+if (!ONLY || ONLY === "safety") {
 console.log("pregnancy run (20 units)...");
 await page.getByRole("button", { name: /Personalize \(optional\)/i }).click();
 await page.locator("label").filter({ hasText: /Pregnant \/ breastfeeding/i })
@@ -98,10 +110,13 @@ if (ONLY === "safety") {
   process.exit(0);
 }
 
-// 06 — the rejection path (free: local detector stops it before any paid call)
-console.log("rejection (0 units)...");
 await again.click();
 await page.getByRole("button", { name: /Analyze my selfie/i }).waitFor();
+}
+
+// 06 — the rejection path (free: local detector stops it before any paid call,
+// so this can be re-shot on its own with --only=rejection at no cost)
+console.log("rejection (0 units)...");
 await analyse(page, NOFACE);
 await page.getByText(/read your face/i).first().waitFor({ timeout: 60_000 });
 await wait(800);
