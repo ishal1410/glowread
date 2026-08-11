@@ -36,19 +36,39 @@ async function analyse(page, file) {
   await chooser.setFiles(file);
 }
 
-/** Centre a section in the viewport, let motion settle, then shoot.
- *
- * Forces block:"center" rather than scrollIntoViewIfNeeded: "if needed" is a
- * no-op when the target is already partly visible, which silently produced a
- * breakdown shot identical to the reveal shot (SSIM 0.9992). */
-async function shot(page, name, locator) {
-  if (locator) {
-    await locator.evaluate((el) => el.scrollIntoView({ block: "center", behavior: "instant" })).catch(() => {});
-    await wait(900);
-  }
+/** Plain viewport shot (landing, rejection). */
+async function shot(page, name) {
   const file = join(OUT, `${name}.png`);
   await page.screenshot({ path: file });
   console.log(`  ${name}.png`);
+}
+
+/** Absolute page rect of the closest `sel` ancestor of a locator (or itself). */
+async function rectOf(locator, sel) {
+  return locator.evaluate((el, s) => {
+    const t = s ? el.closest(s) || el : el;
+    const r = t.getBoundingClientRect();
+    return { x: r.x + window.scrollX, y: r.y + window.scrollY, w: r.width, h: r.height };
+  }, sel);
+}
+
+/** Screenshot the region spanning two elements.
+ *
+ * Viewport shots do NOT work for this page: the whole reveal down to both
+ * routines fits inside one 1400px frame, so "scroll the section into view"
+ * produced a breakdown image showing the same content as the reveal image.
+ * Clipping to measured element bounds makes each shot a distinct component
+ * regardless of how much happens to fit on screen. */
+async function regionShot(page, name, topLoc, bottomLoc, sel = ".card", pad = 36) {
+  const a = await rectOf(topLoc, sel);
+  const b = await rectOf(bottomLoc, sel);
+  const x = Math.max(0, Math.min(a.x, b.x) - pad);
+  const y = Math.max(0, a.y - pad);
+  const right = Math.max(a.x + a.w, b.x + b.w) + pad;
+  const clip = { x, y, width: right - x, height: b.y + b.h + pad - y };
+  const file = join(OUT, `${name}.png`);
+  await page.screenshot({ path: file, fullPage: true, clip });
+  console.log(`  ${name}.png  ${Math.round(clip.width)}x${Math.round(clip.height)}`);
 }
 
 const browser = await chromium.launch({ headless: true });
@@ -76,9 +96,17 @@ if (!ONLY || ONLY === "baseline") {
   await analyse(page, FACE);
   await again.waitFor({ timeout: 180_000 });
   await wait(3500); // let the dial count-up and bloom finish
-  await shot(page, "02-reveal");
-  await shot(page, "03-breakdown", page.getByText(/Full skin breakdown/i).first());
-  await shot(page, "04-products", page.getByText(/Matched to your skin/i).first());
+  // Three non-overlapping regions: the scorecard, the analysis+routine grid,
+  // and the shelf. Each is bounded by its own elements, so they cannot repeat.
+  await regionShot(page, "02-reveal",
+    page.getByText(/skin health/i).first(),
+    page.getByText(/^03 \//).first());
+  await regionShot(page, "03-breakdown",
+    page.getByText(/Full skin breakdown/i).first(),
+    page.getByText(/^Evening$/).first());
+  await regionShot(page, "04-products",
+    page.getByText(/Matched to your skin/i).first(),
+    page.getByText(/Ingredient guidance/i).first(), null);
 
   if (ONLY === "baseline") {
     await context.close();
@@ -101,7 +129,9 @@ await wait(400);
 await analyse(page, FACE);
 await again.waitFor({ timeout: 180_000 });
 await wait(2500);
-await shot(page, "05-safety-gate", page.getByText(/pregnant or breastfeeding/i).first());
+await regionShot(page, "05-safety-gate",
+  page.getByText(/Matched to your skin/i).first(),
+  page.getByText(/pregnant or breastfeeding/i).first(), null);
 
 if (ONLY === "safety") {
   await context.close();
