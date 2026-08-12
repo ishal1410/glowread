@@ -43,6 +43,19 @@ async function shot(page, name) {
   console.log(`  ${name}.png`);
 }
 
+/** Scroll the page top to bottom and back so every row gets painted. */
+async function primePaint(page) {
+  await page.evaluate(async () => {
+    const step = Math.round(window.innerHeight * 0.8);
+    for (let y = 0; y < document.body.scrollHeight; y += step) {
+      window.scrollTo(0, y);
+      await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 120)));
+    }
+    window.scrollTo(0, 0);
+  });
+  await wait(900);
+}
+
 /** Absolute page rect of the closest `sel` ancestor of a locator (or itself). */
 async function rectOf(locator, sel) {
   return locator.evaluate((el, s) => {
@@ -96,6 +109,11 @@ if (!ONLY || ONLY === "baseline") {
   await analyse(page, FACE);
   await again.waitFor({ timeout: 180_000 });
   await wait(3500); // let the dial count-up and bloom finish
+  // fullPage+clip can capture regions the compositor has never painted: the
+  // shelf came back with blank white rectangles sitting on top of product
+  // cards. Scrolling the page through once forces every row to paint before
+  // anything is measured or clipped.
+  await primePaint(page);
   // Three non-overlapping regions: the scorecard, the analysis+routine grid,
   // and the shelf. Each is bounded by its own elements, so they cannot repeat.
   await regionShot(page, "02-reveal",
